@@ -5,7 +5,8 @@ const {
   PutObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
-  DeleteObjectCommand
+  DeleteObjectCommand,
+  ListObjectsV2Command
 } = require('@aws-sdk/client-s3');
 
 const BUCKET = process.env.S3_BUCKET_NAME;
@@ -45,6 +46,24 @@ async function saveToS3(filename, filepath) {
     ContentType: contentTypeFor(filename)
   }));
   console.log(`[S3] Successfully saved ${filename} to ${BUCKET}`);
+  return true;
+}
+
+/** Upload an in-memory buffer to S3 - no disk touched at all. */
+async function saveBufferToS3(key, buffer) {
+  const s3 = getClient();
+  if (!s3) {
+    console.warn(`[S3] Cannot save ${key}: S3 not configured`);
+    return false;
+  }
+
+  await s3.send(new PutObjectCommand({
+    Bucket: BUCKET,
+    Key: key,
+    Body: buffer,
+    ContentType: contentTypeFor(key)
+  }));
+  console.log(`[S3] Successfully saved ${key} to ${BUCKET}`);
   return true;
 }
 
@@ -117,6 +136,24 @@ async function deleteFromS3(filename) {
   return true;
 }
 
+/** List objects under a key prefix, e.g. "assets/". Returns [] if S3 isn't configured. */
+async function listS3Objects(prefix) {
+  const s3 = getClient();
+  if (!s3) return [];
+
+  const objects = [];
+  let ContinuationToken;
+  do {
+    const page = await s3.send(new ListObjectsV2Command({ Bucket: BUCKET, Prefix: prefix, ContinuationToken }));
+    for (const obj of page.Contents || []) {
+      objects.push({ key: obj.Key, size: obj.Size, lastModified: obj.LastModified });
+    }
+    ContinuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (ContinuationToken);
+
+  return objects;
+}
+
 /** Stream an S3 object directly to an HTTP response, bypassing the filesystem. */
 async function streamFromS3ToResponse(filename, res) {
   const s3 = getClient();
@@ -150,9 +187,11 @@ async function streamFromS3ToResponse(filename, res) {
 
 module.exports = {
   saveToS3,
+  saveBufferToS3,
   restoreFromS3,
   existsInS3,
   headS3Object,
   deleteFromS3,
+  listS3Objects,
   streamFromS3ToResponse
 };

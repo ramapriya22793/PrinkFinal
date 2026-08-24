@@ -18,9 +18,9 @@ const router = express.Router();
 const { adminMiddleware } = require('../middleware/auth.middleware');
 
 const os = require('os');
-const isVercel = process.env.VERCEL === '1';
-const ASSETS_DIR = isVercel ? os.tmpdir() : path.join(__dirname, '..', 'uploads', 'assets');
-if (!isVercel && !fs.existsSync(ASSETS_DIR)) fs.mkdirSync(ASSETS_DIR, { recursive: true });
+// Scratch space only, outside the repo directory - S3 is the persistent store.
+const ASSETS_DIR = path.join(os.tmpdir(), 'prink-uploads', 'assets');
+if (!fs.existsSync(ASSETS_DIR)) fs.mkdirSync(ASSETS_DIR, { recursive: true });
 
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml']);
 
@@ -45,15 +45,16 @@ function safeAssetPath(name) {
   return resolved.startsWith(path.resolve(ASSETS_DIR)) ? resolved : null;
 }
 
-router.get('/', adminMiddleware, (_req, res) => {
+router.get('/', adminMiddleware, async (_req, res) => {
   try {
-    const files = fs.readdirSync(ASSETS_DIR)
-      .filter(f => !f.startsWith('.'))
-      .map(f => {
-        const stat = fs.statSync(path.join(ASSETS_DIR, f));
-        return { id: f, filename: f, url: `/uploads/assets/${f}`, size: stat.size, uploadedAt: stat.mtime };
+    const { listS3Objects } = require('../utils/s3Storage');
+    const objects = await listS3Objects('assets/');
+    const files = objects
+      .map(o => {
+        const f = path.basename(o.key);
+        return { id: f, filename: f, url: `/uploads/assets/${f}`, size: o.size, uploadedAt: o.lastModified };
       })
-      .sort((a, b) => b.uploadedAt - a.uploadedAt);
+      .sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
 
     res.json({ success: true, uploads: files });
   } catch (err) {
@@ -90,13 +91,18 @@ router.post('/', adminMiddleware, (req, res) => {
       }
     }
 
-    // Save asset to S3 for deployment persistence
+    // S3 is the only persistent store - the disk copy is scratch space for
+    // validation above and is removed as soon as it's durably saved (or on
+    // failure, since a local-only copy would vanish on the next deploy anyway).
     const { saveToS3 } = require('../utils/s3Storage');
     try {
       await saveToS3(`assets/${req.file.filename}`, req.file.path);
     } catch (s3Err) {
       console.error('[S3 Asset Save Error]', s3Err);
+      fs.unlink(req.file.path, () => {});
+      return res.status(502).json({ success: false, error: 'Failed to save the file to storage. Please try again.' });
     }
+    fs.unlink(req.file.path, () => {});
 
     res.json({
       success: true,
@@ -114,16 +120,19 @@ router.post('/', adminMiddleware, (req, res) => {
 router.delete('/:id', adminMiddleware, async (req, res) => {
   try {
     const target = safeAssetPath(req.params.id);
-    if (!target || !fs.existsSync(target)) {
+    if (!target) {
+      return res.status(400).json({ success: false, error: 'Invalid asset id' });
+    }
+
+    const { existsInS3, deleteFromS3 } = require('../utils/s3Storage');
+    const s3Key = `assets/${req.params.id}`;
+    if (!(await existsInS3(s3Key))) {
       return res.status(404).json({ success: false, error: 'Asset not found' });
     }
-    fs.unlinkSync(target);
-    const { deleteFromS3 } = require('../utils/s3Storage');
-    try {
-      await deleteFromS3(`assets/${req.params.id}`);
-    } catch (s3Err) {
-      console.error('[S3 Asset Delete Error]', s3Err);
-    }
+    await deleteFromS3(s3Key);
+    // Best-effort: only present if this same warm instance served the recent upload.
+    if (fs.existsSync(target)) fs.unlink(target, () => {});
+
     res.json({ success: true, message: 'Asset deleted' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

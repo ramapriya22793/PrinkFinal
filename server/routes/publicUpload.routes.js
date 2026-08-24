@@ -25,15 +25,10 @@ const { resolveTemplate, effectiveDpi } = require('../config/printTemplates');
 const { normalizeTransform, fromLegacyImage } = require('../utils/designTransform');
 const { generatePrintPdf, UPLOADS_DIR } = require('../utils/printRenderer');
 
-const os = require('os');
-const isVercel = process.env.VERCEL === '1';
-
-const ORIGINALS_DIR = isVercel ? os.tmpdir() : path.join(UPLOADS_DIR, 'originals');
-const PREVIEWS_DIR = isVercel ? os.tmpdir() : path.join(UPLOADS_DIR, 'previews');
-if (!isVercel) {
-  for (const dir of [ORIGINALS_DIR, PREVIEWS_DIR]) {
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  }
+const ORIGINALS_DIR = path.join(UPLOADS_DIR, 'originals');
+const PREVIEWS_DIR = path.join(UPLOADS_DIR, 'previews');
+for (const dir of [ORIGINALS_DIR, PREVIEWS_DIR]) {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
 const ALLOWED_MIME = new Set([
@@ -272,14 +267,24 @@ router.post('/order/:token/upload', uploadLimiter, requireUploadToken, (req, res
         .jpeg({ quality: 82 })
         .toFile(path.join(PREVIEWS_DIR, previewName));
 
-      // Save original and preview to S3 for deployment persistence (in background for instant upload response)
+      // S3 is the only persistent store - the customer's photo isn't considered
+      // saved until both the original and its preview are durably there, so this
+      // is awaited (not fire-and-forget) and the request fails if it doesn't land.
+      const previewPath = path.join(PREVIEWS_DIR, previewName);
       const { saveToS3 } = require('../utils/s3Storage');
-      saveToS3(`originals/${req.file.filename}`, req.file.path).catch(s3Err => {
-        console.error('[S3 Upload Save Error - Original]', s3Err);
-      });
-      saveToS3(`previews/${previewName}`, path.join(PREVIEWS_DIR, previewName)).catch(s3Err => {
-        console.error('[S3 Upload Save Error - Preview]', s3Err);
-      });
+      try {
+        await Promise.all([
+          saveToS3(`originals/${req.file.filename}`, req.file.path),
+          saveToS3(`previews/${previewName}`, previewPath)
+        ]);
+      } catch (s3Err) {
+        console.error('[S3 Upload Save Error]', s3Err);
+        fs.unlink(req.file.path, () => {});
+        fs.unlink(previewPath, () => {});
+        return res.status(502).json({ success: false, error: 'Failed to save your photo. Please try again.' });
+      }
+      fs.unlink(req.file.path, () => {});
+      fs.unlink(previewPath, () => {});
 
       const image = {
         id: `img_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,

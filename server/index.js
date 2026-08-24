@@ -92,10 +92,11 @@ app.use(express.json({ limit: '500mb',
 }));
 app.use(express.urlencoded({ limit: '500mb', extended: true }));
 
-// Serve static uploaded files.
-// On serverless environments (like Vercel), dynamically generated files are saved to the OS temp folder.
-// This middleware first tries to serve files from the local uploads folder, falls back to os.tmpdir() if not found,
-// and finally attempts to restore files from S3 if they were lost due to container recycling/redeploys.
+// Serve uploaded files. S3 is the only persistent store - uploads live in an
+// OS temp dir only as scratch space for the request that created them, and
+// are deleted once durably saved to S3. This middleware checks that temp dir
+// first (fast path if this same warm instance just wrote it), then streams
+// from S3, which is where nearly every request actually gets served from.
 const os = require('os');
 const fs = require('fs');
 
@@ -115,7 +116,7 @@ app.use('/uploads', async (req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Vary', 'Accept-Encoding');
 
-  const localFile = path.join(__dirname, 'uploads', relPath);
+  const localFile = path.join(os.tmpdir(), 'prink-uploads', relPath);
   if (fs.existsSync(localFile) && fs.statSync(localFile).isFile()) {
     return res.sendFile(localFile);
   }
