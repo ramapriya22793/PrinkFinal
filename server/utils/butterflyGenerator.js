@@ -508,10 +508,10 @@ async function generateButterflyBoxPdf({ orderId, images, order, orderId2, image
 
     stream.on('finish', async () => {
       try {
-        const { saveToGridFS } = require('./dbStorage');
-        await saveToGridFS(filename, outputPath);
-      } catch (gridfsErr) {
-        console.error('[GridFS Butterfly Print PDF Save Error]', gridfsErr);
+        const { saveToS3 } = require('./s3Storage');
+        await saveToS3(`print/${filename}`, outputPath);
+      } catch (s3Err) {
+        console.error('[S3 Butterfly Print PDF Save Error]', s3Err);
       }
       const stats = fs.statSync(outputPath);
       resolve({

@@ -1,32 +1,40 @@
 const mongoose = require('mongoose');
+const { S3Client, ListObjectsV2Command } = require('@aws-sdk/client-s3');
 require('dotenv').config();
 
 async function check() {
   try {
     const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/theprink';
     console.log(`Connecting to database...`);
-    
+
     await mongoose.connect(uri);
     console.log('Connected to MongoDB successfully.');
 
     const db = mongoose.connection.db;
 
-    // 1. GridFS Files count (bucketName is 'uploads')
-    const fileCount = await db.collection('uploads.files').countDocuments();
-    console.log(`\n[GRIDFS CHECK] Total files (images and PDFs) stored in database (uploads.files): ${fileCount}`);
+    // 1. S3 files count
+    if (process.env.AWS_REGION && process.env.S3_BUCKET_NAME) {
+      const s3 = new S3Client({ region: process.env.AWS_REGION });
+      const listing = await s3.send(new ListObjectsV2Command({ Bucket: process.env.S3_BUCKET_NAME }));
+      const objects = listing.Contents || [];
+      console.log(`\n[S3 CHECK] Total files (images and PDFs) stored in bucket ${process.env.S3_BUCKET_NAME}: ${objects.length}`);
 
-    // 2. Sample 10 files
-    const sampleFiles = await db.collection('uploads.files').find({}).sort({ uploadDate: -1 }).limit(10).toArray();
-    if (sampleFiles.length > 0) {
-      console.log('\nRecent file documents stored inside MongoDB GridFS:');
-      sampleFiles.forEach((f, idx) => {
-        console.log(`  ${idx + 1}. Filename: ${f.filename} | Length: ${(f.length / 1024).toFixed(2)} KB | Uploaded: ${f.uploadDate}`);
-      });
+      if (objects.length > 0) {
+        console.log('\nRecent files stored in S3:');
+        objects
+          .sort((a, b) => new Date(b.LastModified) - new Date(a.LastModified))
+          .slice(0, 10)
+          .forEach((f, idx) => {
+            console.log(`  ${idx + 1}. Key: ${f.Key} | Size: ${(f.Size / 1024).toFixed(2)} KB | Modified: ${f.LastModified}`);
+          });
+      } else {
+        console.log('  No files found in S3.');
+      }
     } else {
-      console.log('  No files found in GridFS.');
+      console.log('\n[S3 CHECK] Skipped: AWS_REGION / S3_BUCKET_NAME not configured.');
     }
 
-    // 3. Orders with images
+    // 2. Orders with images
     const orderCount = await db.collection('orders').countDocuments({ images: { $exists: true, $not: { $size: 0 } } });
     console.log(`\n[ORDERS CHECK] Total orders with mapped customer photos: ${orderCount}`);
 

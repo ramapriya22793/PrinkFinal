@@ -320,6 +320,7 @@ async function handleBatchDownload(req, res) {
         const ext = path.extname(img.url.split('?')[0]) || '.jpg';
         const fileName = `${orderNum}_${skuRaw}_${photoNum}${ext}`;
         const basename = path.basename(img.url.split('?')[0]);
+        const s3Key = img.url.split('?')[0].replace(/^\/uploads\//, '');
         const isVercel = process.env.VERCEL === '1';
         let fullPath = path.join(__dirname, '..', img.url.replace(/^\//, ''));
         if (isVercel) {
@@ -328,13 +329,13 @@ async function handleBatchDownload(req, res) {
 
         if (!fs.existsSync(fullPath)) {
           try {
-            const { existsInGridFS, restoreFromGridFS } = require('../utils/dbStorage');
-            const hasDbFile = await existsInGridFS(basename);
+            const { existsInS3, restoreFromS3 } = require('../utils/s3Storage');
+            const hasDbFile = await existsInS3(s3Key);
             if (hasDbFile) {
-              await restoreFromGridFS(basename, fullPath);
+              await restoreFromS3(s3Key, fullPath);
             }
           } catch (restoreErr) {
-            console.error(`[BATCH DOWNLOAD] GridFS restore failed for ${basename}:`, restoreErr.message);
+            console.error(`[BATCH DOWNLOAD] S3 restore failed for ${basename}:`, restoreErr.message);
           }
         }
 
@@ -351,6 +352,7 @@ async function handleBatchDownload(req, res) {
         const ext = path.extname(file.url.split('?')[0]) || '.pdf';
         const fileName = `${orderNum}_${skuRaw}_PrintFile_${String(idx + 1).padStart(2, '0')}${ext}`;
         const basename = path.basename(file.url.split('?')[0]);
+        const s3Key = file.url.split('?')[0].replace(/^\/uploads\//, '');
         const isVercel = process.env.VERCEL === '1';
         let fullPath = path.join(__dirname, '..', file.url.replace(/^\//, ''));
         if (isVercel) {
@@ -359,13 +361,13 @@ async function handleBatchDownload(req, res) {
 
         if (!fs.existsSync(fullPath)) {
           try {
-            const { existsInGridFS, restoreFromGridFS } = require('../utils/dbStorage');
-            const hasDbFile = await existsInGridFS(basename);
+            const { existsInS3, restoreFromS3 } = require('../utils/s3Storage');
+            const hasDbFile = await existsInS3(s3Key);
             if (hasDbFile) {
-              await restoreFromGridFS(basename, fullPath);
+              await restoreFromS3(s3Key, fullPath);
             }
           } catch (restoreErr) {
-            console.error(`[BATCH DOWNLOAD] GridFS restore failed for ${basename}:`, restoreErr.message);
+            console.error(`[BATCH DOWNLOAD] S3 restore failed for ${basename}:`, restoreErr.message);
           }
         }
 

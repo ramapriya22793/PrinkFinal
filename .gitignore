@@ -8,6 +8,9 @@ server/config/google-credentials.json
 *.log
 .gemini/
 
+server/uploads/*
+!server/uploads/.gitkeep
+
 .vercel
 .env*
 

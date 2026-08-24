@@ -392,13 +392,13 @@ router.post('/:id/upload', authMiddleware(), (req, res) => {
         .jpeg({ quality: 82 })
         .toFile(path.join(PREVIEWS_DIR, previewName));
 
-      // Save both to GridFS in the background so the response is fast
-      const { saveToGridFS } = require('../utils/dbStorage');
-      saveToGridFS(req.file.filename, req.file.path).catch(gridfsErr => {
-        console.error('[GridFS Order Upload Save Error - Original]', gridfsErr);
+      // Save both to S3 in the background so the response is fast
+      const { saveToS3 } = require('../utils/s3Storage');
+      saveToS3(`originals/${req.file.filename}`, req.file.path).catch(s3Err => {
+        console.error('[S3 Order Upload Save Error - Original]', s3Err);
       });
-      saveToGridFS(previewName, path.join(PREVIEWS_DIR, previewName)).catch(gridfsErr => {
-        console.error('[GridFS Order Upload Save Error - Preview]', gridfsErr);
+      saveToS3(`previews/${previewName}`, path.join(PREVIEWS_DIR, previewName)).catch(s3Err => {
+        console.error('[S3 Order Upload Save Error - Preview]', s3Err);
       });
 
       const image = {
@@ -491,10 +491,10 @@ router.post('/:id/design', authMiddleware(), async (req, res) => {
               const filepath = path.join(uploadsDir, filename);
               fs.writeFileSync(filepath, buffer);
               
-              // Save to GridFS for deployment persistence (in the background for fast response)
-              const { saveToGridFS } = require('../utils/dbStorage');
-              saveToGridFS(filename, filepath).catch(gridfsErr => {
-                console.error('[GridFS Base64 Save Error]', gridfsErr);
+              // Save to S3 for deployment persistence (in the background for fast response)
+              const { saveToS3 } = require('../utils/s3Storage');
+              saveToS3(`originals/${filename}`, filepath).catch(s3Err => {
+                console.error('[S3 Base64 Save Error]', s3Err);
               });
 
               processedImages.push({ ...img, src: '/uploads/originals/' + filename, url: '/uploads/originals/' + filename });

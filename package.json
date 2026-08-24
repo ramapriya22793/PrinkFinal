@@ -9,6 +9,7 @@
     "dev:printer": "cd apps/printer && npx vite",
     "dev:server": "npm run dev --prefix server",
     "dev:all": "concurrently \"npm run dev:customer\" \"npm run dev:admin\" \"npm run dev:printer\" \"npm run dev:server\"",
+    "dev:all-frontend": "concurrently \"npm run dev:customer\" \"npm run dev:admin\" \"npm run dev:printer\"",
     "build": "npm install --prefix apps/admin && npm run build --prefix apps/admin && npm install --prefix apps/customer && npm run build --prefix apps/customer && npm install --prefix apps/printer && npm run build --prefix apps/printer && npm install --prefix server && node -e \"const fs=require('fs'); fs.rmSync('public', {recursive:true, force:true}); fs.mkdirSync('public', {recursive:true}); fs.cpSync('apps/admin/dist', 'public/admin', {recursive:true}); fs.cpSync('apps/customer/dist', 'public/customer', {recursive:true}); fs.cpSync('apps/printer/dist', 'public/printer', {recursive:true});\""
   },
   "devDependencies": {

@@ -72,7 +72,7 @@ async function resolveOriginalImageSource(image) {
   let localPath = resolveOriginalPath(image);
   if (localPath) return localPath;
   
-  // 2. Try restoring from GridFS if local file is missing (e.g. ephemeral serverless reset)
+  // 2. Try restoring from S3 if local file is missing (e.g. ephemeral serverless reset)
   const candidates = [
     image?.originalKey,
     image?.storageKey,
@@ -85,23 +85,24 @@ async function resolveOriginalImageSource(image) {
     const basename = path.basename(cleanCandidate);
     
     try {
-      const { existsInGridFS, restoreFromGridFS } = require('./dbStorage');
-      const hasFile = await existsInGridFS(basename);
+      const { existsInS3, restoreFromS3 } = require('./s3Storage');
+      const s3Key = `originals/${basename}`;
+      const hasFile = await existsInS3(s3Key);
       if (hasFile) {
         // If Vercel/serverless, write to /tmp. If not, write to standard originals folder.
         const isVercel = process.env.VERCEL === '1';
-        const targetPath = isVercel 
-          ? path.join(os.tmpdir(), basename) 
+        const targetPath = isVercel
+          ? path.join(os.tmpdir(), basename)
           : path.join(UPLOADS_DIR, 'originals', basename);
-        
-        const restored = await restoreFromGridFS(basename, targetPath);
+
+        const restored = await restoreFromS3(s3Key, targetPath);
         if (restored) {
           localPath = resolveOriginalPath(image);
           if (localPath) return localPath;
         }
       }
-    } catch (gridfsErr) {
-      console.error(`[GridFS Restore Image Error] for ${basename}:`, gridfsErr);
+    } catch (s3Err) {
+      console.error(`[S3 Restore Image Error] for ${basename}:`, s3Err);
     }
   }
   
@@ -408,10 +409,10 @@ async function generatePrintPdf({ orderId, order, image, template, transform }) 
     doc.end();
     stream.on('finish', async () => {
       try {
-        const { saveToGridFS } = require('./dbStorage');
-        await saveToGridFS(filename, outputPath);
-      } catch (gridfsErr) {
-        console.error('[GridFS Print PDF Save Error]', gridfsErr);
+        const { saveToS3 } = require('./s3Storage');
+        await saveToS3(`print/${filename}`, outputPath);
+      } catch (s3Err) {
+        console.error('[S3 Print PDF Save Error]', s3Err);
       }
       resolve();
     });

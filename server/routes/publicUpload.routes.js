@@ -272,13 +272,13 @@ router.post('/order/:token/upload', uploadLimiter, requireUploadToken, (req, res
         .jpeg({ quality: 82 })
         .toFile(path.join(PREVIEWS_DIR, previewName));
 
-      // Save original and preview to GridFS for deployment persistence (in background for instant upload response)
-      const { saveToGridFS } = require('../utils/dbStorage');
-      saveToGridFS(req.file.filename, req.file.path).catch(gridfsErr => {
-        console.error('[GridFS Upload Save Error - Original]', gridfsErr);
+      // Save original and preview to S3 for deployment persistence (in background for instant upload response)
+      const { saveToS3 } = require('../utils/s3Storage');
+      saveToS3(`originals/${req.file.filename}`, req.file.path).catch(s3Err => {
+        console.error('[S3 Upload Save Error - Original]', s3Err);
       });
-      saveToGridFS(previewName, path.join(PREVIEWS_DIR, previewName)).catch(gridfsErr => {
-        console.error('[GridFS Upload Save Error - Preview]', gridfsErr);
+      saveToS3(`previews/${previewName}`, path.join(PREVIEWS_DIR, previewName)).catch(s3Err => {
+        console.error('[S3 Upload Save Error - Preview]', s3Err);
       });
 
       const image = {

@@ -90,12 +90,12 @@ router.post('/', adminMiddleware, (req, res) => {
       }
     }
 
-    // Save asset to GridFS for deployment persistence
-    const { saveToGridFS } = require('../utils/dbStorage');
+    // Save asset to S3 for deployment persistence
+    const { saveToS3 } = require('../utils/s3Storage');
     try {
-      await saveToGridFS(req.file.filename, req.file.path);
-    } catch (gridfsErr) {
-      console.error('[GridFS Asset Save Error]', gridfsErr);
+      await saveToS3(`assets/${req.file.filename}`, req.file.path);
+    } catch (s3Err) {
+      console.error('[S3 Asset Save Error]', s3Err);
     }
 
     res.json({
@@ -111,13 +111,19 @@ router.post('/', adminMiddleware, (req, res) => {
   });
 });
 
-router.delete('/:id', adminMiddleware, (req, res) => {
+router.delete('/:id', adminMiddleware, async (req, res) => {
   try {
     const target = safeAssetPath(req.params.id);
     if (!target || !fs.existsSync(target)) {
       return res.status(404).json({ success: false, error: 'Asset not found' });
     }
     fs.unlinkSync(target);
+    const { deleteFromS3 } = require('../utils/s3Storage');
+    try {
+      await deleteFromS3(`assets/${req.params.id}`);
+    } catch (s3Err) {
+      console.error('[S3 Asset Delete Error]', s3Err);
+    }
     res.json({ success: true, message: 'Asset deleted' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
