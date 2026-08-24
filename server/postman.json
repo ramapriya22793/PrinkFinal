@@ -1,0 +1,435 @@
+{
+  "info": {
+    "name": "PRINK Shopify Integration API",
+    "description": "Collection of API endpoints to test the Shopify OAuth integration, Webhooks, and REST endpoints for PRINK.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "OAuth",
+      "item": [
+        {
+          "name": "Initiate OAuth Flow",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:5000/api/shopify/auth?shop=prink-in.myshopify.com",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["api", "shopify", "auth"],
+              "query": [
+                {
+                  "key": "shop",
+                  "value": "prink-in.myshopify.com"
+                }
+              ]
+            },
+            "description": "Generates the Shopify OAuth redirection URL to trigger store authorization."
+          }
+        },
+        {
+          "name": "OAuth Callback URL",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:5000/api/shopify/callback?shop=prink-in.myshopify.com&code=auth_code_here&state=security_state_here&hmac=shopify_hmac_here",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["api", "shopify", "callback"],
+              "query": [
+                {
+                  "key": "shop",
+                  "value": "prink-in.myshopify.com"
+                },
+                {
+                  "key": "code",
+                  "value": "auth_code_here"
+                },
+                {
+                  "key": "state",
+                  "value": "security_state_here"
+                },
+                {
+                  "key": "hmac",
+                  "value": "shopify_hmac_here"
+                }
+              ]
+            },
+            "description": "Callback endpoint called by Shopify after user approves app access."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin REST API Cache & Proxies",
+      "item": [
+        {
+          "name": "Test Connection",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:5000/api/shopify/test-connection?shop=prink-in.myshopify.com",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["api", "shopify", "test-connection"],
+              "query": [
+                {
+                  "key": "shop",
+                  "value": "prink-in.myshopify.com"
+                }
+              ]
+            },
+            "description": "Tests connectivity directly to Shopify store API scopes."
+          }
+        },
+        {
+          "name": "Get Shop Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:5000/api/shopify/shop?shop=prink-in.myshopify.com",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["api", "shopify", "shop"],
+              "query": [
+                {
+                  "key": "shop",
+                  "value": "prink-in.myshopify.com"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Products List",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:5000/api/shopify/products?shop=prink-in.myshopify.com&limit=10",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["api", "shopify", "products"],
+              "query": [
+                {
+                  "key": "shop",
+                  "value": "prink-in.myshopify.com"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Single Product",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:5000/api/shopify/products/12345678?shop=prink-in.myshopify.com",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["api", "shopify", "products", "12345678"],
+              "query": [
+                {
+                  "key": "shop",
+                  "value": "prink-in.myshopify.com"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Product",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"New Custom Canvas Photo Frame\",\n  \"body_html\": \"<strong>Best personalized gift!</strong>\",\n  \"vendor\": \"PRINK\",\n  \"product_type\": \"canvas\",\n  \"status\": \"active\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost:5000/api/shopify/products?shop=prink-in.myshopify.com",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["api", "shopify", "products"],
+              "query": [
+                {
+                  "key": "shop",
+                  "value": "prink-in.myshopify.com"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Product",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Updated Custom Canvas Photo Frame\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost:5000/api/shopify/products/12345678?shop=prink-in.myshopify.com",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["api", "shopify", "products", "12345678"],
+              "query": [
+                {
+                  "key": "shop",
+                  "value": "prink-in.myshopify.com"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Product",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:5000/api/shopify/products/12345678?shop=prink-in.myshopify.com",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["api", "shopify", "products", "12345678"],
+              "query": [
+                {
+                  "key": "shop",
+                  "value": "prink-in.myshopify.com"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Orders List",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:5000/api/shopify/orders?shop=prink-in.myshopify.com",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["api", "shopify", "orders"],
+              "query": [
+                {
+                  "key": "shop",
+                  "value": "prink-in.myshopify.com"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Customers List",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:5000/api/shopify/customers?shop=prink-in.myshopify.com",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["api", "shopify", "customers"],
+              "query": [
+                {
+                  "key": "shop",
+                  "value": "prink-in.myshopify.com"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Inventory Levels",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:5000/api/shopify/inventory?shop=prink-in.myshopify.com&location_ids=12345",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["api", "shopify", "inventory"],
+              "query": [
+                {
+                  "key": "shop",
+                  "value": "prink-in.myshopify.com"
+                },
+                {
+                  "key": "location_ids",
+                  "value": "12345"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Collections",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "http://localhost:5000/api/shopify/collections?shop=prink-in.myshopify.com",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["api", "shopify", "collections"],
+              "query": [
+                {
+                  "key": "shop",
+                  "value": "prink-in.myshopify.com"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhooks Recipient",
+      "item": [
+        {
+          "name": "Incoming Order Created Webhook",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-shopify-topic",
+                "value": "orders/create",
+                "type": "text"
+              },
+              {
+                "key": "x-shopify-shop-domain",
+                "value": "prink-in.myshopify.com",
+                "type": "text"
+              },
+              {
+                "key": "x-shopify-webhook-id",
+                "value": "web_12345678",
+                "type": "text"
+              },
+              {
+                "key": "x-shopify-hmac-sha256",
+                "value": "calculated_hmac_here",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 888299102,\n  \"email\": \"customer@example.com\",\n  \"order_number\": 1049,\n  \"financial_status\": \"paid\",\n  \"total_price\": \"59.99\",\n  \"currency\": \"USD\",\n  \"line_items\": [\n    {\n      \"id\": 9912028,\n      \"title\": \"Canvas Print Wrap\",\n      \"quantity\": 1,\n      \"price\": \"59.99\",\n      \"sku\": \"CANVAS-12X16\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "http://localhost:5000/api/webhooks/shopify",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["api", "webhooks", "shopify"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
