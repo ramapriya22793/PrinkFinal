@@ -488,20 +488,12 @@ router.post('/order/:token/confirm', uploadLimiter, requireUploadToken, async (r
           const printFiles = [];
           const failures = [];
 
-          for (const img of images) {
-            try {
-              const result = await generatePrintPdf({
-                orderId: claim.id,
-                order: claim,
-                image: img,
-                template,
-                transform: img.transform || fromLegacyImage(img)
-              });
-              printFiles.push({ ...result, imageId: img.id });
-            } catch (err) {
-              console.error('[PRINT RENDER ERROR]', claim.id, img.id, err.message);
-              failures.push({ imageId: img.id, error: err.message });
-            }
+          try {
+            const result = await generatePrintPdf({ orderId: claim.id, order: claim, images, template });
+            printFiles.push(result);
+          } catch (err) {
+            console.error('[PRINT RENDER ERROR]', claim.id, err.message);
+            failures.push({ error: err.message });
           }
 
           const generated = printFiles.length > 0;

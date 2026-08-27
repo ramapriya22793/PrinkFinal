@@ -247,30 +247,46 @@ async function renderPrintRaster(image, template, transformInput) {
  * toolchain (e.g. Ghostscript with an output profile), which is not installed
  * here. See docs/PRINT_PIPELINE.md.
  */
-async function generatePrintPdf({ orderId, order, image, template, transform }) {
+async function generatePrintPdf({ orderId, order, images, image, template, transform }) {
   ensureDirs();
 
   const { fromLegacyImage } = require('./designTransform');
 
-  const allImages = (order && order.images && order.images.length > 0) 
-    ? order.images 
-    : (image ? [image] : []);
+  // `images` lets a caller render an explicit set (e.g. a request-body
+  // override) that may differ from `order.images`; without it we fall back
+  // to the order's own images, and finally to a single legacy `image`.
+  const allImages = (images && images.length > 0)
+    ? images
+    : (order && order.images && order.images.length > 0)
+      ? order.images
+      : (image ? [image] : []);
 
   if (allImages.length === 0) {
     throw new Error('No customer images available for PDF generation.');
   }
 
-  // Render rasters for ALL images
-  const rasters = [];
-  for (const img of allImages) {
-    try {
-      const imgTransform = img.transform || transform || fromLegacyImage(img);
-      const r = await renderPrintRaster(img, template, imgTransform);
-      rasters.push(r);
-    } catch (err) {
-      console.warn(`[PRINT RENDERER] Warning rendering image for order ${orderId}:`, err.message);
+  // Render all rasters concurrently (bounded - each is a full-resolution
+  // sharp decode/resize/composite, so unbounded parallelism would thrash
+  // the libuv threadpool and memory on large orders).
+  const RENDER_CONCURRENCY = 4;
+  const rasterResults = new Array(allImages.length);
+  let cursor = 0;
+  async function renderWorker() {
+    while (cursor < allImages.length) {
+      const idx = cursor++;
+      const img = allImages[idx];
+      try {
+        const imgTransform = img.transform || transform || fromLegacyImage(img);
+        rasterResults[idx] = await renderPrintRaster(img, template, imgTransform);
+      } catch (err) {
+        console.warn(`[PRINT RENDERER] Warning rendering image for order ${orderId}:`, err.message);
+      }
     }
   }
+  await Promise.all(
+    Array.from({ length: Math.min(RENDER_CONCURRENCY, allImages.length) }, renderWorker)
+  );
+  const rasters = rasterResults.filter(Boolean);
 
   if (rasters.length === 0) {
     throw new Error('Failed to render rasters for order images.');

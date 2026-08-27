@@ -3,7 +3,7 @@ const router = express.Router();
 const db = require('../db');
 const { authMiddleware, adminMiddleware } = require('../middleware/auth.middleware');
 const { resolveTemplate } = require('../config/printTemplates');
-const { fromLegacyImage, normalizeTransform } = require('../utils/designTransform');
+const { normalizeTransform } = require('../utils/designTransform');
 const { generatePrintPdf, UPLOADS_DIR } = require('../utils/printRenderer');
 const { generateButterflyBoxPdf } = require('../utils/butterflyGenerator');
 const { allocateButterflyTemplate } = require('../services/butterflyAllocation.service');
@@ -633,17 +633,8 @@ router.post('/:id/review', adminMiddleware, async (req, res) => {
           printFiles.push({ ...file, isMagazine: true });
         } else {
           const { generatePrintPdf } = require('../utils/printRenderer');
-          const { fromLegacyImage } = require('../utils/designTransform');
-          for (const img of images) {
-            const file = await generatePrintPdf({
-              orderId: existingOrder.id,
-              order: existingOrder,
-              image: img,
-              template,
-              transform: img.transform || fromLegacyImage(img)
-            });
-            printFiles.push({ ...file, imageId: img.id });
-          }
+          const file = await generatePrintPdf({ orderId: existingOrder.id, order: existingOrder, images, template });
+          printFiles.push(file);
         }
 
         const generated = printFiles.length > 0;
@@ -792,16 +783,11 @@ router.post('/:id/regenerate', adminMiddleware, async (req, res) => {
         failures.push({ error: err.message });
       }
     } else {
-      for (const img of order.images) {
-        try {
-          const file = await generatePrintPdf({
-            orderId: order.id, order, image: img, template,
-            transform: img.transform || fromLegacyImage(img)
-          });
-          printFiles.push({ ...file, imageId: img.id });
-        } catch (err) {
-          failures.push({ imageId: img.id, error: err.message });
-        }
+      try {
+        const file = await generatePrintPdf({ orderId: order.id, order, images: order.images || [], template });
+        printFiles.push(file);
+      } catch (err) {
+        failures.push({ error: err.message });
       }
     }
 
@@ -819,7 +805,7 @@ router.post('/:id/regenerate', adminMiddleware, async (req, res) => {
 
     const updated = await db.updateOrder(id, updateData);
     await db.addActivityLog(id, 'PDF_REGENERATED',
-      `Admin ${req.user?.email || ''} regenerated the print file (${printFiles.length}/${order.images.length}).`);
+      `Admin ${req.user?.email || ''} regenerated the print file.`);
 
     console.log(`[WORKFLOW LOG] STEP 13 - Admin Generated Production File for Order ${id}`);
 
@@ -913,16 +899,11 @@ router.post('/:id/submit-design', adminMiddleware, async (req, res) => {
         failures.push({ error: err.message });
       }
     } else {
-      for (const img of refreshed.images || []) {
-        try {
-          const file = await generatePrintPdf({
-            orderId: refreshed.id, order: refreshed, image: img, template,
-            transform: img.transform || fromLegacyImage(img)
-          });
-          printFiles.push({ ...file, imageId: img.id });
-        } catch (err) {
-          failures.push({ imageId: img.id, error: err.message });
-        }
+      try {
+        const file = await generatePrintPdf({ orderId: refreshed.id, order: refreshed, images: refreshed.images || [], template });
+        printFiles.push(file);
+      } catch (err) {
+        failures.push({ error: err.message });
       }
     }
 
@@ -1030,16 +1011,11 @@ router.post('/:id/force-approve', adminMiddleware, async (req, res) => {
           console.error('[FORCE APPROVE RENDER ERROR]', id, err.message);
         }
       } else {
-        for (const img of order.images) {
-          try {
-            const file = await generatePrintPdf({
-              orderId: order.id, order, image: img, template,
-              transform: img.transform || fromLegacyImage(img)
-            });
-            printFiles.push({ ...file, imageId: img.id });
-          } catch (err) {
-            console.error('[FORCE APPROVE RENDER ERROR]', id, err.message);
-          }
+        try {
+          const file = await generatePrintPdf({ orderId: order.id, order, images: order.images || [], template });
+          printFiles.push(file);
+        } catch (err) {
+          console.error('[FORCE APPROVE RENDER ERROR]', id, err.message);
         }
       }
       if (!printFiles.length) {

@@ -1479,7 +1479,7 @@ export default function CustomerPortal({
   };
 
   // Upload a single file immediately to prevent 413 Payload Too Large errors
-  const uploadOne = async (file: File, localId: string) => {
+  const uploadOne = async (file: File, localId: string, progressTimer?: ReturnType<typeof setInterval>) => {
     if (!activeOrder) return;
 
     let fileToUpload = file;
@@ -1510,6 +1510,7 @@ export default function CustomerPortal({
       }
 
       if (res.ok && data.success && data.image) {
+        if (progressTimer) clearInterval(progressTimer);
         setUploadProgress(p => {
           const n = { ...p };
           delete n[localId];
@@ -1535,6 +1536,7 @@ export default function CustomerPortal({
       } else {
         showToast(data.error || 'Upload failed.', 'error');
         setImages(prev => prev.filter(img => img.id !== localId));
+        if (progressTimer) clearInterval(progressTimer);
         setUploadProgress(p => { const n = { ...p }; delete n[localId]; return n; });
       }
     } catch (e: any) {
@@ -1553,6 +1555,7 @@ export default function CustomerPortal({
       if (v >= 100) { v = 100; clearInterval(iv); }
       setUploadProgress(p => ({ ...p, [id]: Math.min(v, 100) }));
     }, 120);
+    return iv;
   };
 
   const addImages = (files: FileList | File[]) => {
@@ -1579,9 +1582,9 @@ export default function CustomerPortal({
       reader.onload = e => {
         const src = e.target?.result as string;
         setImages(prev => [...prev, { id, src, name: file.name }]);
-        simulateProgress(id);
+        const progressTimer = simulateProgress(id);
         if (fileIdx === 0) setLivePreviewPhoto(src);
-        uploadOne(file, id);
+        uploadOne(file, id, progressTimer);
       };
       reader.readAsDataURL(file);
     });
