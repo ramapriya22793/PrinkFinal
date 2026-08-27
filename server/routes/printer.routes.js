@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const router = express.Router();
 const db = require('../db');
 const { authMiddleware } = require('../middleware/auth.middleware');
@@ -169,19 +170,17 @@ router.get('/download/:id', printerAuth, async (req, res) => {
     const { generatePrintPdf } = require('../utils/printRenderer');
     const { generateButterflyBoxPdf } = require('../utils/butterflyGenerator');
     const { generateMagazinePdf } = require('../utils/magazineGenerator');
-    const os = require('os');
-    const isVercel = process.env.VERCEL === '1';
+    const { existsInS3 } = require('../utils/s3Storage');
 
     let file = (Array.isArray(order.printFiles) ? order.printFiles : [])[0];
     let needsGeneration = !file || !file.url;
-    let onDisk = null;
 
     if (file && file.url) {
-      onDisk = path.join(__dirname, '..', file.url.replace(/^\//, ''));
-      if (isVercel) {
-        onDisk = path.join(os.tmpdir(), path.basename(file.url));
-      }
-      if (!fs.existsSync(onDisk)) {
+      const s3Key = file.url.split('?')[0].replace(/^\/uploads\//, '');
+      // S3 is the only persistent store - a missing local scratch copy is
+      // normal (the generator deletes it once uploaded), so only regenerate
+      // if the file is actually gone from S3 too.
+      if (!(await existsInS3(s3Key))) {
         needsGeneration = true;
       }
     }
@@ -223,19 +222,15 @@ router.get('/download/:id', printerAuth, async (req, res) => {
             effectiveDpi: generatedFile.effectiveDpi
           };
 
-          if (file && file.url) {
-            if (generatedFile.path !== onDisk) {
-              fs.renameSync(generatedFile.path, onDisk);
-            }
-          } else {
-            file = newFile;
-            await db.updateOrder(order.id, {
-              printFiles: [file],
-              pdfUrl: file.url,
-              printStatus: 'processing',
-              printGenerationStatus: 'success'
-            });
-          }
+          // The regenerated file always gets a fresh S3 key (timestamped
+          // filename), so the stale record is replaced rather than reused.
+          file = newFile;
+          await db.updateOrder(order.id, {
+            printFiles: [file],
+            pdfUrl: file.url,
+            printStatus: 'processing',
+            printGenerationStatus: 'success'
+          });
           console.log(`[PRINTER DOWNLOAD] Successfully generated and saved print file.`);
         } else {
           throw new Error('No template or images found to generate print file.');
@@ -320,21 +315,18 @@ async function handleBatchDownload(req, res) {
         const ext = path.extname(img.url.split('?')[0]) || '.jpg';
         const fileName = `${orderNum}_${skuRaw}_${photoNum}${ext}`;
         const basename = path.basename(img.url.split('?')[0]);
-        const isVercel = process.env.VERCEL === '1';
-        let fullPath = path.join(__dirname, '..', img.url.replace(/^\//, ''));
-        if (isVercel) {
-          fullPath = path.join(require('os').tmpdir(), basename);
-        }
+        const s3Key = img.url.split('?')[0].replace(/^\/uploads\//, '');
+        const fullPath = path.join(os.tmpdir(), 'prink-uploads', s3Key);
 
         if (!fs.existsSync(fullPath)) {
           try {
-            const { existsInGridFS, restoreFromGridFS } = require('../utils/dbStorage');
-            const hasDbFile = await existsInGridFS(basename);
+            const { existsInS3, restoreFromS3 } = require('../utils/s3Storage');
+            const hasDbFile = await existsInS3(s3Key);
             if (hasDbFile) {
-              await restoreFromGridFS(basename, fullPath);
+              await restoreFromS3(s3Key, fullPath);
             }
           } catch (restoreErr) {
-            console.error(`[BATCH DOWNLOAD] GridFS restore failed for ${basename}:`, restoreErr.message);
+            console.error(`[BATCH DOWNLOAD] S3 restore failed for ${basename}:`, restoreErr.message);
           }
         }
 
@@ -351,21 +343,18 @@ async function handleBatchDownload(req, res) {
         const ext = path.extname(file.url.split('?')[0]) || '.pdf';
         const fileName = `${orderNum}_${skuRaw}_PrintFile_${String(idx + 1).padStart(2, '0')}${ext}`;
         const basename = path.basename(file.url.split('?')[0]);
-        const isVercel = process.env.VERCEL === '1';
-        let fullPath = path.join(__dirname, '..', file.url.replace(/^\//, ''));
-        if (isVercel) {
-          fullPath = path.join(require('os').tmpdir(), basename);
-        }
+        const s3Key = file.url.split('?')[0].replace(/^\/uploads\//, '');
+        const fullPath = path.join(os.tmpdir(), 'prink-uploads', s3Key);
 
         if (!fs.existsSync(fullPath)) {
           try {
-            const { existsInGridFS, restoreFromGridFS } = require('../utils/dbStorage');
-            const hasDbFile = await existsInGridFS(basename);
+            const { existsInS3, restoreFromS3 } = require('../utils/s3Storage');
+            const hasDbFile = await existsInS3(s3Key);
             if (hasDbFile) {
-              await restoreFromGridFS(basename, fullPath);
+              await restoreFromS3(s3Key, fullPath);
             }
           } catch (restoreErr) {
-            console.error(`[BATCH DOWNLOAD] GridFS restore failed for ${basename}:`, restoreErr.message);
+            console.error(`[BATCH DOWNLOAD] S3 restore failed for ${basename}:`, restoreErr.message);
           }
         }
 

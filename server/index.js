@@ -92,19 +92,21 @@ app.use(express.json({ limit: '500mb',
 }));
 app.use(express.urlencoded({ limit: '500mb', extended: true }));
 
-// Serve static uploaded files.
-// On serverless environments (like Vercel), dynamically generated files are saved to the OS temp folder.
-// This middleware first tries to serve files from the local uploads folder, falls back to os.tmpdir() if not found,
-// and finally attempts to restore files from GridFS if they were lost due to container recycling/redeploys.
+// Serve uploaded files. S3 is the only persistent store - uploads live in an
+// OS temp dir only as scratch space for the request that created them, and
+// are deleted once durably saved to S3. This middleware checks that temp dir
+// first (fast path if this same warm instance just wrote it), then streams
+// from S3, which is where nearly every request actually gets served from.
 const os = require('os');
 const fs = require('fs');
 
-// In-memory cache of GridFS file metadata to avoid repeated DB queries per image request
-const gridFSMetaCache = new Map();
+// In-memory cache of S3 object metadata to avoid a HeadObject call per image request
+const s3MetaCache = new Map();
 
 app.use('/uploads', async (req, res, next) => {
   const relPath = req.path;
   const filename = path.basename(relPath);
+  const s3Key = relPath.replace(/^\//, '');
 
   // Ensure DB is connected before serving (critical for Vercel cold starts)
   try { await connectDB(); } catch (_e) { /* will fail gracefully below */ }
@@ -114,7 +116,7 @@ app.use('/uploads', async (req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Vary', 'Accept-Encoding');
 
-  const localFile = path.join(__dirname, 'uploads', relPath);
+  const localFile = path.join(os.tmpdir(), 'prink-uploads', relPath);
   if (fs.existsSync(localFile) && fs.statSync(localFile).isFile()) {
     return res.sendFile(localFile);
   }
@@ -125,50 +127,46 @@ app.use('/uploads', async (req, res, next) => {
     return res.sendFile(tmpFile);
   }
   
-  // Fast Fallback: Stream directly from GridFS in Mongo
+  // Fast Fallback: Stream directly from S3
   try {
-    const { streamFromGridFSToResponse } = require('./utils/dbStorage');
-    const mongoose = require('mongoose');
+    const { headS3Object, streamFromS3ToResponse } = require('./utils/s3Storage');
 
-    // Use metadata cache to avoid querying MongoDB on every image request
-    let fileMeta = gridFSMetaCache.get(filename);
-    if (!fileMeta && mongoose.connection && mongoose.connection.readyState === 1 && mongoose.connection.db) {
-      const files = await mongoose.connection.db.collection('uploads.files').find({ filename }).limit(1).toArray();
-      if (files.length > 0) {
-        fileMeta = files[0];
-        gridFSMetaCache.set(filename, fileMeta);
+    // Use metadata cache to avoid a HeadObject call on every image request
+    let fileMeta = s3MetaCache.get(s3Key);
+    if (!fileMeta) {
+      fileMeta = await headS3Object(s3Key);
+      if (fileMeta) {
+        s3MetaCache.set(s3Key, fileMeta);
         // Cap cache size to 500 entries to avoid memory bloat
-        if (gridFSMetaCache.size > 500) {
-          gridFSMetaCache.delete(gridFSMetaCache.keys().next().value);
+        if (s3MetaCache.size > 500) {
+          s3MetaCache.delete(s3MetaCache.keys().next().value);
         }
       }
     }
 
     if (fileMeta) {
       // Set ETag and Last-Modified so browser uses 304 cache on repeat loads
-      const etag = `"${fileMeta._id.toString()}"`;
-      const lastModified = fileMeta.uploadDate ? new Date(fileMeta.uploadDate).toUTCString() : null;
-      if (lastModified) res.setHeader('Last-Modified', lastModified);
-      res.setHeader('ETag', etag);
-      if (fileMeta.length) res.setHeader('Content-Length', fileMeta.length);
+      if (fileMeta.lastModified) res.setHeader('Last-Modified', new Date(fileMeta.lastModified).toUTCString());
+      if (fileMeta.etag) res.setHeader('ETag', fileMeta.etag);
+      if (fileMeta.contentLength) res.setHeader('Content-Length', fileMeta.contentLength);
 
       // Return 304 Not Modified if browser already has this version cached
-      if (req.headers['if-none-match'] === etag) {
+      if (fileMeta.etag && req.headers['if-none-match'] === fileMeta.etag) {
         return res.status(304).end();
       }
 
-      const streamed = await streamFromGridFSToResponse(filename, res);
+      const streamed = await streamFromS3ToResponse(s3Key, res);
       if (streamed) return;
     }
 
-    // If exact filename wasn't found in GridFS (e.g. preview requested but only original exists), try original
+    // If exact key wasn't found in S3 (e.g. preview requested but only original exists), try the original
     if (filename.startsWith('prev_')) {
-      const origFilename = filename.replace('prev_', '');
-      const streamed = await streamFromGridFSToResponse(origFilename, res);
+      const origKey = `originals/${filename.replace('prev_', '')}`;
+      const streamed = await streamFromS3ToResponse(origKey, res);
       if (streamed) return;
     }
-  } catch (gridfsErr) {
-    console.error(`[GridFS Serving Error] for ${filename}:`, gridfsErr.message);
+  } catch (s3Err) {
+    console.error(`[S3 Serving Error] for ${s3Key}:`, s3Err.message);
   }
 
   next();

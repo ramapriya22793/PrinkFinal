@@ -18,14 +18,15 @@ const { printPixelSize, effectiveDpi } = require('../config/printTemplates');
 const { computePlacement, normalizeTransform } = require('./designTransform');
 
 const os = require('os');
-const isVercel = process.env.VERCEL === '1';
 
-const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
-const PRINT_DIR = isVercel ? os.tmpdir() : path.join(UPLOADS_DIR, 'print');
+// S3 is the only persistent store. This is pure scratch space for the
+// current request - never the repo directory - so nothing survives a
+// process restart, and nothing ever needs cleaning out of source control.
+const UPLOADS_DIR = path.join(os.tmpdir(), 'prink-uploads');
+const PRINT_DIR = path.join(UPLOADS_DIR, 'print');
 
 function ensureDirs() {
-  const dirs = isVercel ? [] : [UPLOADS_DIR, PRINT_DIR];
-  for (const dir of dirs) {
+  for (const dir of [UPLOADS_DIR, PRINT_DIR]) {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   }
 }
@@ -72,7 +73,7 @@ async function resolveOriginalImageSource(image) {
   let localPath = resolveOriginalPath(image);
   if (localPath) return localPath;
   
-  // 2. Try restoring from GridFS if local file is missing (e.g. ephemeral serverless reset)
+  // 2. Try restoring from S3 if local file is missing (e.g. ephemeral serverless reset)
   const candidates = [
     image?.originalKey,
     image?.storageKey,
@@ -85,23 +86,19 @@ async function resolveOriginalImageSource(image) {
     const basename = path.basename(cleanCandidate);
     
     try {
-      const { existsInGridFS, restoreFromGridFS } = require('./dbStorage');
-      const hasFile = await existsInGridFS(basename);
+      const { existsInS3, restoreFromS3 } = require('./s3Storage');
+      const s3Key = `originals/${basename}`;
+      const hasFile = await existsInS3(s3Key);
       if (hasFile) {
-        // If Vercel/serverless, write to /tmp. If not, write to standard originals folder.
-        const isVercel = process.env.VERCEL === '1';
-        const targetPath = isVercel 
-          ? path.join(os.tmpdir(), basename) 
-          : path.join(UPLOADS_DIR, 'originals', basename);
-        
-        const restored = await restoreFromGridFS(basename, targetPath);
+        const targetPath = path.join(UPLOADS_DIR, 'originals', basename);
+        const restored = await restoreFromS3(s3Key, targetPath);
         if (restored) {
           localPath = resolveOriginalPath(image);
           if (localPath) return localPath;
         }
       }
-    } catch (gridfsErr) {
-      console.error(`[GridFS Restore Image Error] for ${basename}:`, gridfsErr);
+    } catch (s3Err) {
+      console.error(`[S3 Restore Image Error] for ${basename}:`, s3Err);
     }
   }
   
@@ -407,13 +404,18 @@ async function generatePrintPdf({ orderId, order, image, template, transform }) 
 
     doc.end();
     stream.on('finish', async () => {
+      // S3 is the only persistent store - a print file that only exists in
+      // this ephemeral temp dir is effectively lost, so treat a failed save
+      // as a failed generation rather than reporting success.
       try {
-        const { saveToGridFS } = require('./dbStorage');
-        await saveToGridFS(filename, outputPath);
-      } catch (gridfsErr) {
-        console.error('[GridFS Print PDF Save Error]', gridfsErr);
+        const { saveToS3 } = require('./s3Storage');
+        await saveToS3(`print/${filename}`, outputPath);
+        fs.unlink(outputPath, () => {});
+        resolve();
+      } catch (s3Err) {
+        console.error('[S3 Print PDF Save Error]', s3Err);
+        reject(s3Err);
       }
-      resolve();
     });
     stream.on('error', reject);
   });

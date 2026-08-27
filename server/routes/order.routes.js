@@ -295,10 +295,11 @@ router.get('/:id', adminMiddleware, async (req, res) => {
   }
 });
 
-const os = require('os');
-const isVercel = process.env.VERCEL === '1';
-const ORIGINALS_DIR = isVercel ? os.tmpdir() : path.join(UPLOADS_DIR, 'originals');
-const PREVIEWS_DIR = isVercel ? os.tmpdir() : path.join(UPLOADS_DIR, 'previews');
+const ORIGINALS_DIR = path.join(UPLOADS_DIR, 'originals');
+const PREVIEWS_DIR = path.join(UPLOADS_DIR, 'previews');
+for (const dir of [ORIGINALS_DIR, PREVIEWS_DIR]) {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, ORIGINALS_DIR),
@@ -392,14 +393,23 @@ router.post('/:id/upload', authMiddleware(), (req, res) => {
         .jpeg({ quality: 82 })
         .toFile(path.join(PREVIEWS_DIR, previewName));
 
-      // Save both to GridFS in the background so the response is fast
-      const { saveToGridFS } = require('../utils/dbStorage');
-      saveToGridFS(req.file.filename, req.file.path).catch(gridfsErr => {
-        console.error('[GridFS Order Upload Save Error - Original]', gridfsErr);
-      });
-      saveToGridFS(previewName, path.join(PREVIEWS_DIR, previewName)).catch(gridfsErr => {
-        console.error('[GridFS Order Upload Save Error - Preview]', gridfsErr);
-      });
+      // S3 is the only persistent store - await both saves so the upload isn't
+      // reported as successful until it's actually durably stored.
+      const previewPath = path.join(PREVIEWS_DIR, previewName);
+      const { saveToS3 } = require('../utils/s3Storage');
+      try {
+        await Promise.all([
+          saveToS3(`originals/${req.file.filename}`, req.file.path),
+          saveToS3(`previews/${previewName}`, previewPath)
+        ]);
+      } catch (s3Err) {
+        console.error('[S3 Order Upload Save Error]', s3Err);
+        fs.unlink(req.file.path, () => {});
+        fs.unlink(previewPath, () => {});
+        return res.status(502).json({ success: false, error: 'Failed to save your photo. Please try again.' });
+      }
+      fs.unlink(req.file.path, () => {});
+      fs.unlink(previewPath, () => {});
 
       const image = {
         id: `img_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
@@ -479,29 +489,25 @@ router.post('/:id/design', authMiddleware(), async (req, res) => {
             const matches = img.src.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
             if (matches && matches.length === 3) {
               const crypto = require('crypto');
-              const fs = require('fs');
-              const path = require('path');
               const buffer = Buffer.from(matches[2], 'base64');
               const ext = matches[1].split('/')[1] || 'png';
               const filename = 'orig_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex') + '.' + ext;
-              const os = require('os');
-              const isVercel = process.env.VERCEL === '1';
-              const uploadsDir = isVercel ? os.tmpdir() : path.join(__dirname, '..', 'uploads', 'originals');
-              if (!isVercel && !fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-              const filepath = path.join(uploadsDir, filename);
-              fs.writeFileSync(filepath, buffer);
               
-              // Save to GridFS for deployment persistence (in the background for fast response)
-              const { saveToGridFS } = require('../utils/dbStorage');
-              saveToGridFS(filename, filepath).catch(gridfsErr => {
-                console.error('[GridFS Base64 Save Error]', gridfsErr);
-              });
+              // S3 is the only persistent store - upload the buffer directly,
+              // no disk touched at all, and skip this image if it doesn't land.
+              const { saveBufferToS3 } = require('../utils/s3Storage');
+              try {
+                await saveBufferToS3(`originals/${filename}`, buffer);
+              } catch (s3Err) {
+                console.error('[S3 Base64 Save Error]', s3Err);
+                continue;
+              }
 
               processedImages.push({ ...img, src: '/uploads/originals/' + filename, url: '/uploads/originals/' + filename });
               continue;
             }
           } catch (e) {
-            console.error('Error saving base64 image to disk:', e);
+            console.error('Error saving base64 image to S3:', e);
           }
         }
         processedImages.push(img);

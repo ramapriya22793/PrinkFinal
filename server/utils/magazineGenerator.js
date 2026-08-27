@@ -133,13 +133,18 @@ async function generateMagazinePdf({ orderId, images, order }) {
     doc.end();
 
     stream.on('finish', async () => {
-      try {
-        const { saveToGridFS } = require('./dbStorage');
-        await saveToGridFS(filename, outputPath);
-      } catch (gridfsErr) {
-        console.error('[GridFS Magazine Print PDF Save Error]', gridfsErr);
-      }
       const stats = fs.statSync(outputPath);
+      // S3 is the only persistent store - a print file that only exists in
+      // this ephemeral temp dir is effectively lost, so treat a failed save
+      // as a failed generation rather than reporting success.
+      try {
+        const { saveToS3 } = require('./s3Storage');
+        await saveToS3(`print/${filename}`, outputPath);
+        fs.unlink(outputPath, () => {});
+      } catch (s3Err) {
+        console.error('[S3 Magazine Print PDF Save Error]', s3Err);
+        return reject(s3Err);
+      }
       resolve({
         filename,
         path: outputPath,
