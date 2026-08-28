@@ -18,15 +18,14 @@ const { printPixelSize, effectiveDpi } = require('../config/printTemplates');
 const { computePlacement, normalizeTransform } = require('./designTransform');
 
 const os = require('os');
+const isVercel = process.env.VERCEL === '1';
 
-// S3 is the only persistent store. This is pure scratch space for the
-// current request - never the repo directory - so nothing survives a
-// process restart, and nothing ever needs cleaning out of source control.
-const UPLOADS_DIR = path.join(os.tmpdir(), 'prink-uploads');
-const PRINT_DIR = path.join(UPLOADS_DIR, 'print');
+const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
+const PRINT_DIR = isVercel ? os.tmpdir() : path.join(UPLOADS_DIR, 'print');
 
 function ensureDirs() {
-  for (const dir of [UPLOADS_DIR, PRINT_DIR]) {
+  const dirs = isVercel ? [] : [UPLOADS_DIR, PRINT_DIR];
+  for (const dir of dirs) {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   }
 }
@@ -73,7 +72,7 @@ async function resolveOriginalImageSource(image) {
   let localPath = resolveOriginalPath(image);
   if (localPath) return localPath;
   
-  // 2. Try restoring from S3 if local file is missing (e.g. ephemeral serverless reset)
+  // 2. Try restoring from GridFS if local file is missing (e.g. ephemeral serverless reset)
   const candidates = [
     image?.originalKey,
     image?.storageKey,
@@ -86,19 +85,23 @@ async function resolveOriginalImageSource(image) {
     const basename = path.basename(cleanCandidate);
     
     try {
-      const { existsInS3, restoreFromS3 } = require('./s3Storage');
-      const s3Key = `originals/${basename}`;
-      const hasFile = await existsInS3(s3Key);
+      const { existsInGridFS, restoreFromGridFS } = require('./dbStorage');
+      const hasFile = await existsInGridFS(basename);
       if (hasFile) {
-        const targetPath = path.join(UPLOADS_DIR, 'originals', basename);
-        const restored = await restoreFromS3(s3Key, targetPath);
+        // If Vercel/serverless, write to /tmp. If not, write to standard originals folder.
+        const isVercel = process.env.VERCEL === '1';
+        const targetPath = isVercel 
+          ? path.join(os.tmpdir(), basename) 
+          : path.join(UPLOADS_DIR, 'originals', basename);
+        
+        const restored = await restoreFromGridFS(basename, targetPath);
         if (restored) {
           localPath = resolveOriginalPath(image);
           if (localPath) return localPath;
         }
       }
-    } catch (s3Err) {
-      console.error(`[S3 Restore Image Error] for ${basename}:`, s3Err);
+    } catch (gridfsErr) {
+      console.error(`[GridFS Restore Image Error] for ${basename}:`, gridfsErr);
     }
   }
   
@@ -168,7 +171,7 @@ async function renderPrintRaster(image, template, transformInput) {
       width: Math.max(1, Math.round(placement.drawWidth)),
       height: Math.max(1, Math.round(placement.drawHeight)),
       fit: 'fill',
-      kernel: 'lanczos3'
+      kernel: 'mitchell'
     })
     .linear(a, b);
 
@@ -218,13 +221,13 @@ async function renderPrintRaster(image, template, transformInput) {
     create: {
       width: canvas.width,
       height: canvas.height,
-      channels: 4,
-      background: { r: 255, g: 255, b: 255, alpha: 1 }
+      channels: 3,
+      background: { r: 255, g: 255, b: 255 }
     }
   })
     .composite(composites)
     .withMetadata({ density: template.dpi || 300 })
-    .png({ compressionLevel: 3 })
+    .jpeg({ quality: 95, chromaSubsampling: '4:4:4' })
     .toBuffer();
 
   return {
@@ -247,46 +250,30 @@ async function renderPrintRaster(image, template, transformInput) {
  * toolchain (e.g. Ghostscript with an output profile), which is not installed
  * here. See docs/PRINT_PIPELINE.md.
  */
-async function generatePrintPdf({ orderId, order, images, image, template, transform }) {
+async function generatePrintPdf({ orderId, order, image, template, transform }) {
   ensureDirs();
 
   const { fromLegacyImage } = require('./designTransform');
 
-  // `images` lets a caller render an explicit set (e.g. a request-body
-  // override) that may differ from `order.images`; without it we fall back
-  // to the order's own images, and finally to a single legacy `image`.
-  const allImages = (images && images.length > 0)
-    ? images
-    : (order && order.images && order.images.length > 0)
-      ? order.images
-      : (image ? [image] : []);
+  const allImages = (order && order.images && order.images.length > 0) 
+    ? order.images 
+    : (image ? [image] : []);
 
   if (allImages.length === 0) {
     throw new Error('No customer images available for PDF generation.');
   }
 
-  // Render all rasters concurrently (bounded - each is a full-resolution
-  // sharp decode/resize/composite, so unbounded parallelism would thrash
-  // the libuv threadpool and memory on large orders).
-  const RENDER_CONCURRENCY = 4;
-  const rasterResults = new Array(allImages.length);
-  let cursor = 0;
-  async function renderWorker() {
-    while (cursor < allImages.length) {
-      const idx = cursor++;
-      const img = allImages[idx];
-      try {
-        const imgTransform = img.transform || transform || fromLegacyImage(img);
-        rasterResults[idx] = await renderPrintRaster(img, template, imgTransform);
-      } catch (err) {
-        console.warn(`[PRINT RENDERER] Warning rendering image for order ${orderId}:`, err.message);
-      }
+  // Render rasters for ALL images
+  const rasters = [];
+  for (const img of allImages) {
+    try {
+      const imgTransform = img.transform || transform || fromLegacyImage(img);
+      const r = await renderPrintRaster(img, template, imgTransform);
+      rasters.push(r);
+    } catch (err) {
+      console.warn(`[PRINT RENDERER] Warning rendering image for order ${orderId}:`, err.message);
     }
   }
-  await Promise.all(
-    Array.from({ length: Math.min(RENDER_CONCURRENCY, allImages.length) }, renderWorker)
-  );
-  const rasters = rasterResults.filter(Boolean);
 
   if (rasters.length === 0) {
     throw new Error('Failed to render rasters for order images.');
@@ -420,18 +407,13 @@ async function generatePrintPdf({ orderId, order, images, image, template, trans
 
     doc.end();
     stream.on('finish', async () => {
-      // S3 is the only persistent store - a print file that only exists in
-      // this ephemeral temp dir is effectively lost, so treat a failed save
-      // as a failed generation rather than reporting success.
       try {
-        const { saveToS3 } = require('./s3Storage');
-        await saveToS3(`print/${filename}`, outputPath);
-        fs.unlink(outputPath, () => {});
-        resolve();
-      } catch (s3Err) {
-        console.error('[S3 Print PDF Save Error]', s3Err);
-        reject(s3Err);
+        const { saveToGridFS } = require('./dbStorage');
+        await saveToGridFS(filename, outputPath);
+      } catch (gridfsErr) {
+        console.error('[GridFS Print PDF Save Error]', gridfsErr);
       }
+      resolve();
     });
     stream.on('error', reject);
   });

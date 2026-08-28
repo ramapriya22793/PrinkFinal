@@ -529,6 +529,46 @@ router.post('/shopify-dev-login', async (req, res) => {
         }
       }
 
+      if (!matchedOrder) {
+        console.log(`[SHOPIFY DEV LOGIN] Generating mock order for dev login: ${identifier}`);
+        const crypto = require('crypto');
+        const Order = require('../models/Order');
+        const mockToken = crypto.randomBytes(32).toString('hex');
+        const mockId = `DEV-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+        const mockOrderNo = Math.floor(1000 + Math.random() * 9000).toString();
+        
+        const isEmail = identifier.includes('@');
+        const targetEmail = isEmail ? identifier.toLowerCase().trim() : (email ? email.toLowerCase().trim() : `dev_${mockOrderNo}@customer.com`);
+        const targetPhone = !isEmail && cleanPhone.length >= 7 ? phone || cleanPhone : (phone || '+919999999999');
+
+        matchedOrder = await Order.create({
+          id: mockId,
+          orderNumber: mockOrderNo,
+          name: `#${mockOrderNo}`,
+          shopifyId: mockId,
+          customer: {
+            name: firstName && lastName ? `${firstName} ${lastName}` : 'Dev Tester',
+            email: targetEmail,
+            phone: targetPhone
+          },
+          email: targetEmail,
+          phone: targetPhone,
+          product: 'Photo Frame 8x10',
+          sku: 'PRK-FRM-810',
+          quantity: 1,
+          uploadToken: mockToken,
+          uploadTokenHash: crypto.createHash('sha256').update(mockToken).digest('hex'),
+          uploadLink: `${process.env.FRONTEND_URL || 'http://localhost:3001'}/o/${mockToken}`,
+          workflowStatus: 'personalization_pending',
+          requiresCustomization: true,
+          requiredPhotoCount: 1
+        });
+
+        if (matchedOrder && typeof matchedOrder.toObject === 'function') {
+          matchedOrder = matchedOrder.toObject();
+        }
+      }
+
       if (matchedOrder) {
         targetShopifyOrderId = matchedOrder.shopifyId;
         const targetEmail = matchedOrder.customer?.email || matchedOrder.email || `${matchedOrder.shopifyId}@customer.com`;
