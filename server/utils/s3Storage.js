@@ -32,8 +32,7 @@ function contentTypeFor(filename) {
 async function saveToS3(filename, filepath) {
   const s3 = getClient();
   if (!s3) {
-    console.warn(`[S3] Cannot save ${filename}: S3 not configured`);
-    return false;
+    throw new Error(`[S3] Cannot save ${filename}: S3 not configured`);
   }
   if (!fs.existsSync(filepath)) {
     throw new Error(`File not found at ${filepath}`);
@@ -53,8 +52,7 @@ async function saveToS3(filename, filepath) {
 async function saveBufferToS3(key, buffer) {
   const s3 = getClient();
   if (!s3) {
-    console.warn(`[S3] Cannot save ${key}: S3 not configured`);
-    return false;
+    throw new Error(`[S3] Cannot save ${key}: S3 not configured`);
   }
 
   await s3.send(new PutObjectCommand({
