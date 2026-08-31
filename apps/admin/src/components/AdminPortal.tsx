@@ -143,6 +143,9 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
   // Orders
   const [orders, setOrders] = useState<Order[]>([]);
   const [orderSearch, setOrderSearch] = useState('');
+  // Dashboard widget: the 5 most recently *submitted* orders (customer
+  // confirmed their design in the upload portal), not just recently created.
+  const [recentSubmissions, setRecentSubmissions] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [customerSearch, setCustomerSearch] = useState('');
   const [orderTab, setOrderTab] = useState<'all' | 'ready' | 'pending' | 'photo_uploaded' | 'approved' | 'rejected' | 'sent_to_printer' | 'printer_processing' | 'completed'>('all');
@@ -412,6 +415,24 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
     }
   };
 
+  // Dashboard "Recently Submitted" widget - orders the customer actually
+  // confirmed in the upload portal, most recent first. Deliberately separate
+  // from fetchOrders: that list is sorted by order creation time, not by
+  // when (or whether) the customer submitted a design.
+  const fetchRecentSubmissions = async () => {
+    try {
+      const res = await fetch('/api/orders/recent-submissions?limit=5', {
+        headers: { 'Authorization': 'Bearer ' + localStorage.getItem('admin_token') }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRecentSubmissions(data.orders || []);
+      }
+    } catch (err) {
+      console.error('[fetchRecentSubmissions] Exception:', err);
+    }
+  };
+
 
   const fetchQueue = async () => {
     if (isFetchingQueue.current) return;
@@ -642,6 +663,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
   useEffect(() => {
     if (screen === 'dashboard') {
       fetchOrders();
+      fetchRecentSubmissions();
 
       // Fetch all other lists in the background without blocking the main KPI Overview
       fetchCustomers();
@@ -654,6 +676,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
       // so the admin dashboard gets updated without overloading the database.
       const interval = setInterval(() => {
         fetchOrders();
+        fetchRecentSubmissions();
         fetchQueue();
       }, 10000);
 
@@ -1560,7 +1583,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
               {/* Recent Orders */}
               <div className="card p-6">
                 <div className="flex justify-between align-center mb-4">
-                  <h3 style={{ fontWeight: 700, color: 'var(--primary)', fontSize: '1rem' }}>Recent Orders</h3>
+                  <h3 style={{ fontWeight: 700, color: 'var(--primary)', fontSize: '1rem' }}>Recently Submitted</h3>
                   <button className="btn btn-outline btn-sm" onClick={() => setSection('orders')}>View All</button>
                 </div>
                 <div className="clean-table-wrapper">
@@ -1575,7 +1598,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                       </tr>
                     </thead>
                     <tbody>
-                      {loadingData && (
+                      {loadingData && recentSubmissions.length === 0 && (
                         <tr>
                           <td colSpan={5} style={{ textAlign: 'center', padding: '2rem', color: '#94a3b8' }}>
                             <i className="bi bi-arrow-clockwise animate-spin" style={{ display: 'inline-block', marginRight: '6px' }} />
@@ -1583,14 +1606,14 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                           </td>
                         </tr>
                       )}
-                      {!loadingData && orders.length === 0 && (
+                      {!loadingData && recentSubmissions.length === 0 && (
                         <tr>
                           <td colSpan={5} style={{ textAlign: 'center', padding: '2rem', color: '#94a3b8' }}>
-                            No orders found.
+                            No customer submissions yet.
                           </td>
                         </tr>
                       )}
-                      {!loadingData && orders.slice(0, 4).map(o => (
+                      {recentSubmissions.map(o => (
                         <tr key={o.id}>
                           <td>
                             <a 
