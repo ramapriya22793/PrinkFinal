@@ -50,70 +50,126 @@ const ALLOWED_TRANSITIONS = {
 
 const STAGE_ORDER = ['pending', 'queued', 'processing', 'completed'];
 
+// Target vocabulary must match the frontend's PrintStatus type exactly
+// ('processing', not 'printing') - the workflowStatus override below already
+// used 'processing', so this previously produced two different labels for
+// the same conceptual state depending on which field drove it. Orders
+// reaching 'processing' only through printStatus (never via a
+// printer_processing workflowStatus) were silently invisible in the
+// printer app's "Printing" tab, since nothing there checks for 'printing'.
 const DASHBOARD_STATUS = {
   pending:       'pending',
   queued:        'print-ready',
   'print-ready': 'print-ready',
   ready:         'print-ready',
-  processing:    'printing',
-  printing:      'printing',
+  processing:    'processing',
+  printing:      'processing',
   completed:     'completed'
 };
 
-/** Only approved/sent work reaches the print floor, or all orders for printer inspection. */
-router.get('/queue', printerAuth, async (_req, res) => {
+/** Derive the frontend's PrintStatus vocabulary from the stored fields. */
+function deriveDashStatus(printStatus, workflowStatus) {
+  let dashStatus = DASHBOARD_STATUS[printStatus] || 'pending';
+  if (workflowStatus === 'sent_to_printer') dashStatus = 'pending';
+  else if (workflowStatus === 'printer_processing') dashStatus = 'processing';
+  else if (workflowStatus === 'completed') dashStatus = 'completed';
+  return dashStatus;
+}
+
+function serializeQueueItem(o) {
+  const filesArray = Array.isArray(o.printFiles) ? o.printFiles : [];
+  const file = filesArray.filter(Boolean)[0];
+  return {
+    id: o.id,
+    orderNumber: o.orderNumber,
+    customer: o.customer?.name || o.customer?.email || (typeof o.customer === 'string' ? o.customer : 'Guest'),
+    customerEmail: o.customerEmail || o.email || o.customer?.email,
+    phone: o.phone || o.customer?.phone,
+    product: o.product,
+    sku: o.sku,
+    quantity: o.quantity,
+    templateId: o.templateId,
+    status: deriveDashStatus(o.printStatus, o.workflowStatus),
+    printStatus: o.printStatus,
+    workflowStatus: o.workflowStatus,
+    orderStatus: o.orderStatus,
+    priority: o.priority || 'normal',
+    pdfUrl: o.pdfUrl,
+    shippingAddress: o.shippingAddress,
+    deliveryTemplate: o.deliveryTemplate,
+    customizationStatus: o.customizationStatus,
+    uploadStatus: o.uploadStatus,
+    trimSize: (file && file.widthMm && file.heightMm) ? `${Math.round(file.widthMm)}x${Math.round(file.heightMm)}mm` : '-',
+    assignedAt: o.printerAssignedAt || o.updatedAt,
+    printFiles: filesArray.filter(Boolean).map(f => ({
+      url: f.url, dpi: f.dpi, effectiveDpi: f.effectiveDpi,
+      widthMm: f.widthMm, heightMm: f.heightMm, colourSpace: f.colourSpace
+    })),
+    updatedAt: o.updatedAt
+  };
+}
+
+/**
+ * Only approved/sent work reaches the print floor, or all orders for printer
+ * inspection.
+ *
+ * `status` and `search` can't be expressed as a plain Mongo filter - status
+ * is derived from a combination of two fields (see deriveDashStatus), not
+ * stored directly. So this runs as two passes: a cheap scan across every
+ * order using only the handful of small fields needed to match status/search
+ * (never the heavy ones - images, shippingAddress, printFiles, etc.), then a
+ * second query that fetches full order data for only the current page's
+ * worth of matches. The full documents for orders outside the current page
+ * are never touched.
+ */
+router.get('/queue', printerAuth, async (req, res) => {
   try {
     const Order = require('../models/Order');
-    // Lightweight projection: exclude heavy embedded arrays not needed for queue listing
-    const queueProjection = {
-      designData: 0,
-      designRevisions: 0,
-      printGenerationErrors: 0,
-      activityLogs: 0,
-      customerApprovedImages: 0,
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(200, parseInt(req.query.limit) || 50);
+    const status = req.query.status || '';
+    const search = (req.query.search || '').trim().toLowerCase();
+
+    const lightProjection = {
+      _id: 0, id: 1, orderNumber: 1, printStatus: 1, workflowStatus: 1,
+      product: 1, sku: 1, createdAt: 1,
+      'customer.name': 1, 'customer.email': 1
     };
-    const orders = await Order.find({}, queueProjection).sort({ createdAt: -1 }).lean();
+    const light = await Order.find({}, lightProjection).sort({ createdAt: -1 }).lean();
+
+    const tabCounts = { all: light.length, pending: 0, 'print-ready': 0, processing: 0, completed: 0 };
+    const matches = [];
+    for (const o of light) {
+      const dashStatus = deriveDashStatus(o.printStatus, o.workflowStatus);
+      if (tabCounts[dashStatus] !== undefined) tabCounts[dashStatus]++;
+
+      if (status && status !== 'all' && dashStatus !== status) continue;
+      if (search) {
+        const haystack = [o.id, o.orderNumber, o.customer?.name, o.customer?.email, o.product, o.sku]
+          .filter(Boolean).join(' ').toLowerCase();
+        if (!haystack.includes(search)) continue;
+      }
+      matches.push(o.id);
+    }
+
+    const total = matches.length;
+    const pageIds = matches.slice((page - 1) * limit, (page - 1) * limit + limit);
+
+    // Lightweight projection for the heavy fetch: excludes fields the queue
+    // view never renders (images, designData, etc. - see serializeQueueItem).
+    const queueProjection = {
+      designData: 0, designRevisions: 0, printGenerationErrors: 0,
+      activityLogs: 0, customerApprovedImages: 0, images: 0
+    };
+    const pageOrders = await Order.find({ id: { $in: pageIds } }, queueProjection).lean();
+    const byId = new Map(pageOrders.map(o => [o.id, o]));
+    const queue = pageIds.map(id => byId.get(id)).filter(Boolean).map(serializeQueueItem);
+
     res.json({
       success: true,
-      queue: orders.map(o => {
-        const filesArray = Array.isArray(o.printFiles) ? o.printFiles : [];
-        const file = filesArray.filter(Boolean)[0];
-        const ws = o.workflowStatus;
-        // Map workflowStatus to the frontend PrintStatus vocabulary
-        let dashStatus = DASHBOARD_STATUS[o.printStatus] || 'pending';
-        if (ws === 'sent_to_printer') dashStatus = 'pending';
-        else if (ws === 'printer_processing') dashStatus = 'processing';
-        else if (ws === 'completed') dashStatus = 'completed';
-        return {
-          id: o.id,
-          orderNumber: o.orderNumber,
-          customer: o.customer?.name || o.customer?.email || (typeof o.customer === 'string' ? o.customer : 'Guest'),
-          customerEmail: o.customerEmail || o.email || o.customer?.email,
-          phone: o.phone || o.customer?.phone,
-          product: o.product,
-          sku: o.sku,
-          quantity: o.quantity,
-          templateId: o.templateId,
-          status: dashStatus,
-          printStatus: o.printStatus,
-          workflowStatus: o.workflowStatus,
-          orderStatus: o.orderStatus,
-          priority: o.priority || 'normal',
-          images: o.images || [],
-          pdfUrl: o.pdfUrl,
-          shippingAddress: o.shippingAddress,
-          deliveryTemplate: o.deliveryTemplate,
-          customizationStatus: o.customizationStatus,
-          uploadStatus: o.uploadStatus,
-          trimSize: (file && file.widthMm && file.heightMm) ? `${Math.round(file.widthMm)}x${Math.round(file.heightMm)}mm` : '-',
-          assignedAt: o.printerAssignedAt || o.updatedAt,
-          printFiles: filesArray.filter(Boolean).map(f => ({
-            url: f.url, dpi: f.dpi, effectiveDpi: f.effectiveDpi,
-            widthMm: f.widthMm, heightMm: f.heightMm, colourSpace: f.colourSpace
-          })),
-          updatedAt: o.updatedAt
-        };
-      })
+      queue,
+      pagination: { total, page, limit, pages: Math.ceil(total / limit) },
+      tabCounts
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

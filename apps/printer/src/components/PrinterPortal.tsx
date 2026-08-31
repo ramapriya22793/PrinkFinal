@@ -40,6 +40,10 @@ export default function PrinterPortal({ extraItems = [] }: PrinterPortalProps) {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<StatusFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [queuePage, setQueuePage] = useState(1);
+  const [queuePages, setQueuePages] = useState(1);
+  const [queueTotal, setQueueTotal] = useState(0);
+  const [tabCounts, setTabCounts] = useState<Record<string, number>>({ all: 0, pending: 0, 'print-ready': 0, processing: 0, completed: 0 });
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [expandedOrder, setExpandedOrder] = useState<any | null>(null);
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
@@ -61,7 +65,8 @@ export default function PrinterPortal({ extraItems = [] }: PrinterPortalProps) {
 
   const isFetchingQueue = useRef(false);
 
-  // Load printer queue from backend
+  // Load printer queue from backend - paginated, filtered and searched
+  // server-side so nothing beyond the current page is ever fetched.
   const fetchQueue = async () => {
     const token = localStorage.getItem('printer_token');
     if (!token) {
@@ -72,7 +77,13 @@ export default function PrinterPortal({ extraItems = [] }: PrinterPortalProps) {
     if (isFetchingQueue.current) return;
     isFetchingQueue.current = true;
     try {
-      const res = await fetch('/api/printer/queue', {
+      const params = new URLSearchParams({
+        page: String(queuePage),
+        limit: '50',
+        ...(filter && filter !== 'all' ? { status: filter } : {}),
+        ...(searchQuery.trim() ? { search: searchQuery.trim() } : {})
+      });
+      const res = await fetch(`/api/printer/queue?${params}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -82,6 +93,11 @@ export default function PrinterPortal({ extraItems = [] }: PrinterPortalProps) {
         // Handle both direct array and object formats ({ success: true, queue: [...] })
         const list = Array.isArray(data) ? data : (data.queue || []);
         setQueue(list);
+        if (data.pagination) {
+          setQueuePages(data.pagination.pages || 1);
+          setQueueTotal(data.pagination.total || 0);
+        }
+        if (data.tabCounts) setTabCounts(data.tabCounts);
       } else if (res.status === 401 || res.status === 403) {
         localStorage.removeItem('printer_token');
         setScreen('login');
@@ -95,14 +111,22 @@ export default function PrinterPortal({ extraItems = [] }: PrinterPortalProps) {
     }
   };
 
+  // Changing tab/search jumps back to page 1 of the new result set.
+  useEffect(() => {
+    setQueuePage(1);
+  }, [filter, searchQuery]);
+
   useEffect(() => {
     if (screen === 'dashboard') {
       fetchQueue();
-      // Set up a 10-second polling interval for real-time tracking updates
+      // Set up a 10-second polling interval for real-time tracking updates.
+      // Depending on page/filter/search too so the interval always polls
+      // with the currently-viewed slice, not whatever was current when the
+      // effect first ran.
       const interval = setInterval(fetchQueue, 10000);
       return () => clearInterval(interval);
     }
-  }, [screen]);
+  }, [screen, queuePage, filter, searchQuery]);
 
   // Sync incoming admin routed items to queue database (simulate server side addition)
   useEffect(() => {
@@ -198,22 +222,12 @@ export default function PrinterPortal({ extraItems = [] }: PrinterPortalProps) {
     showToast('Terminal session closed.', 'info');
   };
 
-  const filteredQueue = queue
-    .filter(item => filter === 'all' || item.status === filter)
-    .filter(item => {
-      const q = searchQuery.toLowerCase().trim();
-      if (!q) return true;
-      return (
-        item.id.toLowerCase().includes(q) ||
-        customerName(item.customer).toLowerCase().includes(q) ||
-        (item.product && item.product.toLowerCase().includes(q)) ||
-        ((item as any).sku && (item as any).sku.toLowerCase().includes(q)) ||
-        (item.status && item.status.toLowerCase().includes(q))
-      );
-    })
-    .sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]);
+  // Status and search are already applied server-side (see fetchQueue) - the
+  // server returns exactly the current page of the matching set, so only the
+  // display-order sort happens here.
+  const filteredQueue = [...queue].sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]);
 
-  const countByStatus = (s: PrintStatus) => queue.filter(i => i.status === s).length;
+  const countByStatus = (s: PrintStatus) => tabCounts[s] || 0;
 
   const toggleSelectOrder = (id: string) => {
     setSelectedOrderIds(prev =>
@@ -337,7 +351,7 @@ export default function PrinterPortal({ extraItems = [] }: PrinterPortalProps) {
   };
 
   const tabs: { id: StatusFilter; label: string; count?: number }[] = [
-    { id: 'all',         label: 'All Jobs',        count: queue.length            },
+    { id: 'all',         label: 'All Jobs',        count: tabCounts.all            },
     { id: 'pending',     label: 'Pending',         count: countByStatus('pending')     },
     { id: 'print-ready', label: 'Print Ready',     count: countByStatus('print-ready') },
     { id: 'processing',  label: 'Printing',        count: countByStatus('processing')  },
@@ -888,6 +902,32 @@ export default function PrinterPortal({ extraItems = [] }: PrinterPortalProps) {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {!loading && queueTotal > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 4px 4px', flexWrap: 'wrap', gap: 10 }}>
+            <span style={{ fontSize: 12, color: '#94a3b8' }}>
+              Page {queuePage} of {queuePages} · {queueTotal} job{queueTotal === 1 ? '' : 's'} total
+            </span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                className="btn btn-sm btn-outline"
+                disabled={queuePage === 1}
+                style={{ opacity: queuePage === 1 ? 0.5 : 1 }}
+                onClick={() => setQueuePage(p => Math.max(p - 1, 1))}
+              >
+                Prev
+              </button>
+              <button
+                className="btn btn-sm btn-outline"
+                disabled={queuePage === queuePages}
+                style={{ opacity: queuePage === queuePages ? 0.5 : 1 }}
+                onClick={() => setQueuePage(p => Math.min(p + 1, queuePages))}
+              >
+                Next
+              </button>
+            </div>
           </div>
         )}
         </div>
