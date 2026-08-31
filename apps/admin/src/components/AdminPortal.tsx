@@ -663,30 +663,38 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
     }
   };
 
+  // Orders feed the default landing section (Overview) plus Orders/Monitor/
+  // Reports, so they're fetched as soon as the dashboard loads and kept
+  // polling regardless of which section is active. Every other section's
+  // data (customers, queue, settings, SKU mappings, templates) used to be
+  // fetched unconditionally here too - all six API calls firing on login
+  // before the user had navigated anywhere. Each now only loads when its
+  // own section is actually opened (see the effect below).
   useEffect(() => {
     if (screen === 'dashboard') {
       fetchOrders();
-
-      // Fetch all other lists in the background without blocking the main KPI Overview
-      fetchCustomers();
-      fetchQueue();
-      fetchSettings();
-      fetchSkuMappings();
-      fetchDbTemplates();
-
-      // Poll database updates automatically every 10 seconds
-      // so the admin dashboard gets updated without overloading the database.
-      // Depending on queuePage/queueTab too so the interval always polls
-      // with the currently-viewed slice, not whatever was current when the
-      // effect first ran.
-      const interval = setInterval(() => {
-        fetchOrders();
-        fetchQueue();
-      }, 10000);
-
+      const interval = setInterval(fetchOrders, 10000);
       return () => clearInterval(interval);
     }
-  }, [screen, queuePage, queueTab]);
+  }, [screen]);
+
+  // Lazy, section-triggered fetches: each list loads the first time (and
+  // every time) its section is opened, not preemptively on login.
+  useEffect(() => {
+    if (screen !== 'dashboard') return;
+    if (section === 'customers') fetchCustomers();
+    else if (section === 'settings') fetchSettings();
+    else if (section === 'sku-mappings') fetchSkuMappings();
+    else if (section === 'templates') fetchDbTemplates();
+  }, [screen, section]);
+
+  // Queue polling only runs while the Print Queue section is actually open.
+  useEffect(() => {
+    if (screen !== 'dashboard' || section !== 'queue') return;
+    fetchQueue();
+    const interval = setInterval(fetchQueue, 10000);
+    return () => clearInterval(interval);
+  }, [screen, section, queuePage, queueTab]);
 
   // ── Auth ──────────────────────────────────────────────────────────────────────
   const handleRegister = async (e?: React.FormEvent) => {
