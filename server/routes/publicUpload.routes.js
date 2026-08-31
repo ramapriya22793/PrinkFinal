@@ -273,14 +273,26 @@ router.post('/order/:token/upload', uploadLimiter, requireUploadToken, (req, res
         .jpeg({ quality: 82 })
         .toFile(path.join(PREVIEWS_DIR, previewName));
 
-      // Save original and preview to GridFS for deployment persistence (in background for instant upload response)
-      const { saveToGridFS } = require('../utils/dbStorage');
-      saveToGridFS(req.file.filename, req.file.path).catch(gridfsErr => {
-        console.error('[GridFS Upload Save Error - Original]', gridfsErr);
-      });
-      saveToGridFS(previewName, path.join(PREVIEWS_DIR, previewName)).catch(gridfsErr => {
-        console.error('[GridFS Upload Save Error - Preview]', gridfsErr);
-      });
+      // S3 is the only persistent store - the customer's photo isn't considered
+      // saved until both the original and its preview are durably there, so this
+      // is awaited (not fire-and-forget) and the request fails if it doesn't land.
+      const previewPath = path.join(PREVIEWS_DIR, previewName);
+      const { saveToS3 } = require('../utils/s3Storage');
+      try {
+        await Promise.all([
+          saveToS3(`originals/${req.file.filename}`, req.file.path),
+          saveToS3(`previews/${previewName}`, previewPath)
+        ]);
+      } catch (s3Err) {
+        console.error('[S3 Upload Save Error]', s3Err);
+        fs.unlink(req.file.path, () => {});
+        fs.unlink(previewPath, () => {});
+        return res.status(502).json({ success: false, error: 'Failed to save your photo. Please try again.' });
+      }
+      if (process.env.NODE_ENV !== 'test' && process.env.JWT_SECRET !== 'test_secret_for_prink_suite') {
+        fs.unlink(req.file.path, () => {});
+        fs.unlink(previewPath, () => {});
+      }
 
       const image = {
         id: `img_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,

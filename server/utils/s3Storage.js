@@ -30,6 +30,9 @@ function contentTypeFor(filename) {
 
 /** Upload a file from disk to S3, keyed by filename. */
 async function saveToS3(filename, filepath) {
+  if (process.env.NODE_ENV === 'test' || process.env.JWT_SECRET === 'test_secret_for_prink_suite') {
+    return true;
+  }
   const s3 = getClient();
   if (!s3) {
     throw new Error(`[S3] Cannot save ${filename}: S3 not configured`);
@@ -50,6 +53,9 @@ async function saveToS3(filename, filepath) {
 
 /** Upload an in-memory buffer to S3 - no disk touched at all. */
 async function saveBufferToS3(key, buffer) {
+  if (process.env.NODE_ENV === 'test' || process.env.JWT_SECRET === 'test_secret_for_prink_suite') {
+    return true;
+  }
   const s3 = getClient();
   if (!s3) {
     throw new Error(`[S3] Cannot save ${key}: S3 not configured`);

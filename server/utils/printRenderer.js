@@ -71,6 +71,41 @@ async function resolveOriginalImageSource(image) {
   // 1. Try local resolution first
   let localPath = resolveOriginalPath(image);
   if (localPath) return localPath;
+  // 1.5. Try S3 restoration first before GridFS
+  try {
+    const { existsInS3, restoreFromS3 } = require('./s3Storage');
+    const s3Candidates = [
+      image?.originalKey,
+      image?.storageKey,
+      image?.serverFilename,
+      image?.url && path.basename(image.url)
+    ].filter(Boolean);
+
+    for (const candidate of s3Candidates) {
+      const cleanCandidate = candidate.startsWith('/') ? candidate.slice(1) : candidate;
+      let s3Key = cleanCandidate;
+      if (!s3Key.includes('/')) {
+        s3Key = `originals/${s3Key}`;
+      }
+
+      const hasFile = await existsInS3(s3Key);
+      if (hasFile) {
+        const basename = path.basename(s3Key);
+        const isVercel = process.env.VERCEL === '1';
+        const targetPath = isVercel 
+          ? path.join(os.tmpdir(), basename) 
+          : path.join(UPLOADS_DIR, 'originals', basename);
+
+        const restored = await restoreFromS3(s3Key, targetPath);
+        if (restored) {
+          localPath = resolveOriginalPath(image);
+          if (localPath) return localPath;
+        }
+      }
+    }
+  } catch (s3Err) {
+    console.error('[S3 Restore Image Error]', s3Err.message);
+  }
   
   // 2. Try restoring from GridFS if local file is missing (e.g. ephemeral serverless reset)
   const candidates = [
