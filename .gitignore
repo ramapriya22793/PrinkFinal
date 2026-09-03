@@ -11,3 +11,6 @@ server/config/google-credentials.json
 
 server/uploads/*
 !server/uploads/.gitkeep
+
+.vercel
+.env*
