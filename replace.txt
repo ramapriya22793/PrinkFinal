@@ -1,0 +1,31 @@
+) : paginatedOrders.flatMap((item: any) => {
+  const renderOrderCells = (o: any) => (
+    <React.Fragment>
+
+    </React.Fragment>
+  );
+
+  if (item.isGroup) {
+    return [
+      <tr key={item.id} style={{ backgroundColor: '#eef2ff' }}>
+        <td colSpan={8} style={{ padding: '0.5rem 1rem', borderBottom: 'none', borderLeft: '4px solid #6366f1' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600, color: '#4338ca', fontSize: '0.85rem' }}>
+            <i className="bi bi-diagram-3-fill"></i> Butterfly Box Pair (Template ID: {item.templateId.substring(0,8)}...)
+          </div>
+        </td>
+      </tr>,
+      ...item.orders.map((o: any, idx: number) => (
+         <tr key={o.id} style={{ backgroundColor: '#fdfdff', borderLeft: '4px solid #6366f1' }}>
+            {renderOrderCells(o)}
+         </tr>
+      ))
+    ];
+  }
+
+  const o = item;
+  return (
+    <tr key={o.id}>
+      {renderOrderCells(o)}
+    </tr>
+  );
+})}

@@ -1,0 +1,36 @@
+{
+    "name": "the-prink-frontend",
+    "private": true,
+    "version": "1.0.0",
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "tsc && vite build",
+        "preview": "vite preview"
+    },
+    "dependencies": {
+        "axios": "^1.18.1",
+        "html2canvas": "^1.4.1",
+        "konva": "^9.3.22",
+        "react": "^18.3.1",
+        "react-dom": "^18.3.1",
+        "react-konva": "^18.2.10",
+        "react-router-dom": "^7.18.0",
+        "use-image": "^1.1.4"
+    },
+    "devDependencies": {
+        "@types/react": "^18.3.1",
+        "@types/react-dom": "^18.3.1",
+        "@types/react-router-dom": "^5.3.3",
+        "@vitejs/plugin-react": "^4.3.1",
+        "autoprefixer": "^10.5.2",
+        "concurrently": "^10.0.3",
+        "framer-motion": "^12.42.2",
+        "lucide-react": "^1.24.0",
+        "postcss": "^8.5.16",
+        "recharts": "^3.9.2",
+        "tailwindcss": "^3.4.19",
+        "typescript": "^5.5.3",
+        "vite": "^5.4.2"
+    }
+}

@@ -1,0 +1,164 @@
+{
+  "version": 2,
+  "regions": ["bom1"],
+  "crons": [
+    {
+      "path": "/api/cron/sync",
+      "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/sheets/sync-all",
+      "schedule": "30 20 * * *"
+    }
+  ],
+  "builds": [
+    { "src": "package.json", "use": "@vercel/static-build", "config": { "distDir": "public" } },
+    { "src": "server/index.js", "use": "@vercel/node", "config": { "maxDuration": 60 } }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "server/index.js"
+    },
+    {
+      "src": "/uploads/(.*)",
+      "dest": "server/index.js"
+    },
+    {
+      "src": "/(.*)",
+      "has": [{ "type": "host", "value": "api.theprink.in" }],
+      "dest": "server/index.js"
+    },
+    {
+      "src": "/api/(.*)",
+      "has": [{ "type": "host", "value": "admin.theprink.in" }],
+      "dest": "server/index.js"
+    },
+    {
+      "src": "/api/(.*)",
+      "has": [{ "type": "host", "value": "customer.theprink.in" }],
+      "dest": "server/index.js"
+    },
+    {
+      "src": "/api/(.*)",
+      "has": [{ "type": "host", "value": "printer.theprink.in" }],
+      "dest": "server/index.js"
+    },
+    {
+      "src": "/uploads/(.*)",
+      "has": [{ "type": "host", "value": "admin.theprink.in" }],
+      "dest": "server/index.js"
+    },
+    {
+      "src": "/uploads/(.*)",
+      "has": [{ "type": "host", "value": "customer.theprink.in" }],
+      "dest": "server/index.js"
+    },
+    {
+      "src": "/uploads/(.*)",
+      "has": [{ "type": "host", "value": "printer.theprink.in" }],
+      "dest": "server/index.js"
+    },
+    {
+      "src": "/(.*)",
+      "has": [{ "type": "host", "value": "admin.theprink.in" }],
+      "dest": "/admin/$1"
+    },
+    {
+      "src": "/(.*)",
+      "has": [{ "type": "host", "value": "printer.theprink.in" }],
+      "dest": "/printer/$1"
+    },
+    {
+      "src": "/assets/(.*)",
+      "has": [{ "type": "host", "value": "customer.theprink.in" }],
+      "dest": "/customer/assets/$1"
+    },
+    {
+      "src": "/assets/(.*)",
+      "has": [{ "type": "host", "value": "admin.theprink.in" }],
+      "dest": "/admin/assets/$1"
+    },
+    {
+      "src": "/assets/(.*)",
+      "has": [{ "type": "host", "value": "printer.theprink.in" }],
+      "dest": "/printer/assets/$1"
+    },
+    {
+      "src": "/(.*\\.(?:js|css|png|jpg|jpeg|svg|ico|webp|woff|woff2|ttf|map))",
+      "has": [{ "type": "host", "value": "customer.theprink.in" }],
+      "dest": "/customer/$1"
+    },
+    {
+      "src": "/(.*\\.(?:js|css|png|jpg|jpeg|svg|ico|webp|woff|woff2|ttf|map))",
+      "has": [{ "type": "host", "value": "admin.theprink.in" }],
+      "dest": "/admin/$1"
+    },
+    {
+      "src": "/(.*\\.(?:js|css|png|jpg|jpeg|svg|ico|webp|woff|woff2|ttf|map))",
+      "has": [{ "type": "host", "value": "printer.theprink.in" }],
+      "dest": "/printer/$1"
+    },
+    {
+      "src": "/(.*)",
+      "has": [{ "type": "host", "value": "customer.theprink.in" }],
+      "dest": "/customer/$1"
+    },
+    {
+      "src": "/admin/(.*)",
+      "dest": "/admin/$1"
+    },
+    {
+      "src": "/admin",
+      "dest": "/admin/index.html"
+    },
+    {
+      "src": "/printer/(.*)",
+      "dest": "/printer/$1"
+    },
+    {
+      "src": "/printer",
+      "dest": "/printer/index.html"
+    },
+    {
+      "src": "/customer/(.*)",
+      "dest": "/customer/$1"
+    },
+    {
+      "src": "/customer",
+      "dest": "/customer/index.html"
+    },
+    { "handle": "filesystem" },
+    {
+      "src": "/admin/(.*)",
+      "dest": "/admin/index.html"
+    },
+    {
+      "src": "/printer/(.*)",
+      "dest": "/printer/index.html"
+    },
+    {
+      "src": "/customer/(.*)",
+      "dest": "/customer/index.html"
+    },
+    {
+      "src": "/(.*)",
+      "has": [{ "type": "host", "value": "admin.theprink.in" }],
+      "dest": "/admin/index.html"
+    },
+    {
+      "src": "/(.*)",
+      "has": [{ "type": "host", "value": "printer.theprink.in" }],
+      "dest": "/printer/index.html"
+    },
+    {
+      "src": "/(.*)",
+      "has": [{ "type": "host", "value": "customer.theprink.in" }],
+      "dest": "/customer/index.html"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/customer/index.html"
+    }
+  ]
+}

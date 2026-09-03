@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.history/
+.env*
+data/*.json
+server/data/*.json
+server/config/google-credentials.json
+*.log
+.gemini/
+.vercel
+
+server/uploads/*
+!server/uploads/.gitkeep

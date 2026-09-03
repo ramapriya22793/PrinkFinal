@@ -1,0 +1,25 @@
+{
+  "name": "the-prink",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev:all",
+    "dev:customer": "cd apps/customer && npx vite",
+    "dev:admin": "cd apps/admin && npx vite",
+    "dev:printer": "cd apps/printer && npx vite",
+    "dev:server": "npm run dev --prefix server",
+    "dev:all": "concurrently \"npm run dev:customer\" \"npm run dev:admin\" \"npm run dev:printer\" \"npm run dev:server\"",
+    "dev:all-frontend": "concurrently \"npm run dev:customer\" \"npm run dev:admin\" \"npm run dev:printer\"",
+    "build": "npm install --prefix apps/admin && npm run build --prefix apps/admin && npm install --prefix apps/customer && npm run build --prefix apps/customer && npm install --prefix apps/printer && npm run build --prefix apps/printer && npm install --prefix server && node -e \"const fs=require('fs'); fs.rmSync('public', {recursive:true, force:true}); fs.mkdirSync('public', {recursive:true}); fs.cpSync('apps/admin/dist', 'public/admin', {recursive:true}); fs.cpSync('apps/customer/dist', 'public/customer', {recursive:true}); fs.cpSync('apps/printer/dist', 'public/printer', {recursive:true});\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "vite": "^5.4.10"
+  },
+  "dependencies": {
+    "@shopify/shopify-api": "^13.1.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "googleapis": "^173.0.0"
+  }
+}
