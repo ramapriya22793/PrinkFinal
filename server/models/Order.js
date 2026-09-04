@@ -92,6 +92,7 @@ orderSchema.index({ adminApprovalStatus: 1 });
 orderSchema.index({ orderStatus: 1 });
 orderSchema.index({ printStatus: 1 });
 orderSchema.index({ workflowStatus: 1 });                  // unified workflow tracking
+orderSchema.index({ designLockedAt: -1 });                  // recent customer-submitted designs (dashboard widget)
 
 module.exports = mongoose.models.Order || mongoose.model('Order', orderSchema);
 

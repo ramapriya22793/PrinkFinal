@@ -79,7 +79,38 @@ router.get('/', adminMiddleware, async (req, res) => {
   }
 });
 
+/**
+ * Recently *submitted* orders for the dashboard widget - not recently
+ * created. `designLockedAt` is set only when a customer confirms their
+ * design in the upload portal, so this reflects actual customer activity
+ * rather than however recently Shopify happened to sync the order.
+ */
+router.get('/recent-submissions', adminMiddleware, async (req, res) => {
+  try {
+    const Order = require('../models/Order');
+    const limit = Math.min(20, parseInt(req.query.limit) || 5);
 
+    const listProjection = {
+      images: 0,
+      designData: 0,
+      designRevisions: 0,
+      printFiles: 0,
+      printGenerationErrors: 0,
+      activityLogs: 0,
+      customerApprovedImages: 0,
+    };
+
+    const orders = await Order.find({ designLockedAt: { $ne: null } }, listProjection)
+      .sort({ designLockedAt: -1 })
+      .limit(limit)
+      .lean();
+
+    res.json({ success: true, orders });
+  } catch (err) {
+    console.error('[GET /api/orders/recent-submissions] Error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 
 // Alias for customer/orders (Filtered by customer token identity)
