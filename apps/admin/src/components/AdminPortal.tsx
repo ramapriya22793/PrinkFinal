@@ -167,6 +167,10 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
   // Print Queue
   const [printQueue, setPrintQueue] = useState<PrinterQueueItem[]>([]);
   const [queueTab, setQueueTab] = useState<'all' | PrinterQueueItem['status']>('all');
+  const [queuePage, setQueuePage] = useState(1);
+  const [queuePages, setQueuePages] = useState(1);
+  const [queueTotal, setQueueTotal] = useState(0);
+  const [queueTabCounts, setQueueTabCounts] = useState<Record<string, number>>({ all: 0, pending: 0, 'print-ready': 0, processing: 0, completed: 0 });
 
   // Settings toggles
   const [toggles, setToggles] = useState({
@@ -434,11 +438,21 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
   };
 
 
+  // Paginated and status-filtered server-side - fetches only the current
+  // page/tab's worth of orders, not the whole print queue.
   const fetchQueue = async () => {
     if (isFetchingQueue.current) return;
     isFetchingQueue.current = true;
     try {
-      const res = await fetch('/api/printer/queue', {
+      // This app's PrintStatus type spells the in-progress state 'printing';
+      // the server (and the printer app) use 'processing' - translate here.
+      const serverStatus = queueTab === 'printing' ? 'processing' : queueTab;
+      const params = new URLSearchParams({
+        page: String(queuePage),
+        limit: '50',
+        ...(serverStatus && serverStatus !== 'all' ? { status: serverStatus } : {})
+      });
+      const res = await fetch(`/api/printer/queue?${params}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('admin_token')}`
         }
@@ -447,6 +461,11 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
         const data = await res.json();
         const list = Array.isArray(data) ? data : (data.queue || []);
         setPrintQueue(list);
+        if (data.pagination) {
+          setQueuePages(data.pagination.pages || 1);
+          setQueueTotal(data.pagination.total || 0);
+        }
+        if (data.tabCounts) setQueueTabCounts(data.tabCounts);
       }
     } catch (err) {
       console.error('Failed to fetch print queue:', err);
@@ -454,6 +473,11 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
       isFetchingQueue.current = false;
     }
   };
+
+  // Changing the status tab jumps back to page 1 of the new result set.
+  useEffect(() => {
+    setQueuePage(1);
+  }, [queueTab]);
 
 
   const fetchSkuMappings = async () => {
@@ -660,29 +684,42 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
     }
   };
 
+  // Orders feed the default landing section (Overview) plus Orders/Monitor/
+  // Reports, so they're fetched as soon as the dashboard loads and kept
+  // polling regardless of which section is active. Every other section's
+  // data (customers, queue, settings, SKU mappings, templates) used to be
+  // fetched unconditionally here too - all six API calls firing on login
+  // before the user had navigated anywhere. Each now only loads when its
+  // own section is actually opened (see the effect below).
   useEffect(() => {
     if (screen === 'dashboard') {
       fetchOrders();
       fetchRecentSubmissions();
-
-      // Fetch all other lists in the background without blocking the main KPI Overview
-      fetchCustomers();
-      fetchQueue();
-      fetchSettings();
-      fetchSkuMappings();
-      fetchDbTemplates();
-
-      // Poll database updates automatically every 10 seconds
-      // so the admin dashboard gets updated without overloading the database.
       const interval = setInterval(() => {
         fetchOrders();
         fetchRecentSubmissions();
-        fetchQueue();
       }, 10000);
-
       return () => clearInterval(interval);
     }
   }, [screen]);
+
+  // Lazy, section-triggered fetches: each list loads the first time (and
+  // every time) its section is opened, not preemptively on login.
+  useEffect(() => {
+    if (screen !== 'dashboard') return;
+    if (section === 'customers') fetchCustomers();
+    else if (section === 'settings') fetchSettings();
+    else if (section === 'sku-mappings') fetchSkuMappings();
+    else if (section === 'templates') fetchDbTemplates();
+  }, [screen, section]);
+
+  // Queue polling only runs while the Print Queue section is actually open.
+  useEffect(() => {
+    if (screen !== 'dashboard' || section !== 'queue') return;
+    fetchQueue();
+    const interval = setInterval(fetchQueue, 10000);
+    return () => clearInterval(interval);
+  }, [screen, section, queuePage, queueTab]);
 
   // ── Auth ──────────────────────────────────────────────────────────────────────
   const handleRegister = async (e?: React.FormEvent) => {
@@ -1175,12 +1212,9 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
     t.productType.toLowerCase().includes(templateSearch.toLowerCase())
   );
 
-  const filteredQueue = printQueue.filter(q => {
-    if (queueTab === 'all') return true;
-    if (queueTab === 'print-ready') return q.status === 'print-ready' || (q.status as string) === 'ready';
-    if (queueTab === 'printing') return q.status === 'printing' || (q.status as string) === 'processing';
-    return q.status === queueTab;
-  });
+  // Status filtering already happens server-side (see fetchQueue) - printQueue
+  // is already exactly the current page of the current tab's matching set.
+  const filteredQueue = printQueue;
 
   const photoUploadedCount  = orders.filter(o => o.workflowStatus === 'photo_uploaded' || (!o.workflowStatus && o.uploadStatus === 'ready')).length;
   const approvedCount       = orders.filter(o => o.workflowStatus === 'approved' || (!o.workflowStatus && o.adminApprovalStatus === 'approved')).length;
@@ -2432,11 +2466,14 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
             {/* Tab bar */}
             <div className="tab-bar mb-4">
               {([
-                { key: 'all',          label: 'All Jobs',     count: printQueue.length },
-                { key: 'pending',      label: '⏳ Pending',     count: printQueue.filter(q => q.status === 'pending').length },
-                { key: 'print-ready',  label: '📋 Print Ready', count: printQueue.filter(q => q.status === 'print-ready' || (q.status as string) === 'ready').length },
-                { key: 'printing',     label: '🖨️ Printing',   count: printQueue.filter(q => q.status === 'printing' || (q.status as string) === 'processing').length },
-                { key: 'completed',    label: '🎉 Completed',  count: printQueue.filter(q => q.status === 'completed').length },
+                { key: 'all',          label: 'All Jobs',     count: queueTabCounts.all },
+                { key: 'pending',      label: '⏳ Pending',     count: queueTabCounts.pending },
+                { key: 'print-ready',  label: '📋 Print Ready', count: queueTabCounts['print-ready'] },
+                // Server's tabCounts key is 'processing' (matches the printer app's
+                // vocabulary) - this tab's own key stays 'printing' to match this
+                // app's PrintStatus type, so the two are mapped here.
+                { key: 'printing',     label: '🖨️ Printing',   count: queueTabCounts.processing },
+                { key: 'completed',    label: '🎉 Completed',  count: queueTabCounts.completed },
               ] as const).map(t => (
                 <button
                   key={t.key}
@@ -2510,6 +2547,32 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                 </tbody>
               </table>
             </div>
+
+            {queueTotal > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 4px 4px', flexWrap: 'wrap', gap: 10 }}>
+                <span style={{ fontSize: 12, color: '#94a3b8' }}>
+                  Page {queuePage} of {queuePages} · {queueTotal} job{queueTotal === 1 ? '' : 's'} total
+                </span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    className="btn btn-sm btn-outline"
+                    disabled={queuePage === 1}
+                    style={{ opacity: queuePage === 1 ? 0.5 : 1 }}
+                    onClick={() => setQueuePage(p => Math.max(p - 1, 1))}
+                  >
+                    Prev
+                  </button>
+                  <button
+                    className="btn btn-sm btn-outline"
+                    disabled={queuePage === queuePages}
+                    style={{ opacity: queuePage === queuePages ? 0.5 : 1 }}
+                    onClick={() => setQueuePage(p => Math.min(p + 1, queuePages))}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
