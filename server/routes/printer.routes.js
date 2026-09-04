@@ -1,7 +1,6 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const router = express.Router();
 const db = require('../db');
 const { authMiddleware } = require('../middleware/auth.middleware');
@@ -37,9 +36,9 @@ const ALLOWED_TRANSITIONS = {
   printing:            { printStatus: 'processing',  orderStatus: 'Printing',             workflowStatus: 'printing' },
   processing:          { printStatus: 'processing',  orderStatus: 'Printing',             workflowStatus: 'printing' },
   assigned:            { printStatus: 'processing',  orderStatus: 'Printing',             workflowStatus: 'printing' },
+  printed:             { printStatus: 'processing',  orderStatus: 'Printing',             workflowStatus: 'printing' },
 
-  completed:           { printStatus: 'completed',   orderStatus: 'Ready for Dispatch',   workflowStatus: 'ready_for_dispatch' },
-  printed:             { printStatus: 'completed',   orderStatus: 'Ready for Dispatch',   workflowStatus: 'ready_for_dispatch' },
+  completed:           { printStatus: 'completed',   orderStatus: 'Delivered',          deliveryStatus: 'delivered', workflowStatus: 'delivered' },
   ready_for_dispatch:  { printStatus: 'completed',   orderStatus: 'Ready for Dispatch',   workflowStatus: 'ready_for_dispatch' },
   packed:              { printStatus: 'completed',   orderStatus: 'Ready for Dispatch',   workflowStatus: 'ready_for_dispatch' },
   in_transit:          { printStatus: 'completed',   orderStatus: 'In Transit',         deliveryStatus: 'shipped',   workflowStatus: 'in_transit' },
@@ -180,7 +179,7 @@ router.get('/queue/:id', printerAuth, async (req, res) => {
   try {
     const order = await db.getOrderById(req.params.id);
     if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
-    
+
     const inPrinterWorkflow = ['sent_to_printer', 'printer_processing', 'completed'].includes(order.workflowStatus);
     if (order.adminApprovalStatus !== 'approved' && !inPrinterWorkflow) {
       return res.status(403).json({ success: false, error: 'This order has not been approved for printing yet.' });
@@ -226,17 +225,19 @@ router.get('/download/:id', printerAuth, async (req, res) => {
     const { generatePrintPdf } = require('../utils/printRenderer');
     const { generateButterflyBoxPdf } = require('../utils/butterflyGenerator');
     const { generateMagazinePdf } = require('../utils/magazineGenerator');
-    const { existsInS3 } = require('../utils/s3Storage');
+    const os = require('os');
+    const isVercel = process.env.VERCEL === '1';
 
-    let file = (Array.isArray(order.printFiles) ? order.printFiles : [])[0];
+    let file = (order.printFiles || [])[0];
     let needsGeneration = !file || !file.url;
+    let onDisk = null;
 
     if (file && file.url) {
-      const s3Key = file.url.split('?')[0].replace(/^\/uploads\//, '');
-      // S3 is the only persistent store - a missing local scratch copy is
-      // normal (the generator deletes it once uploaded), so only regenerate
-      // if the file is actually gone from S3 too.
-      if (!(await existsInS3(s3Key))) {
+      onDisk = path.join(__dirname, '..', file.url.replace(/^\//, ''));
+      if (isVercel) {
+        onDisk = path.join(os.tmpdir(), path.basename(file.url));
+      }
+      if (!fs.existsSync(onDisk)) {
         needsGeneration = true;
       }
     }
@@ -278,15 +279,19 @@ router.get('/download/:id', printerAuth, async (req, res) => {
             effectiveDpi: generatedFile.effectiveDpi
           };
 
-          // The regenerated file always gets a fresh S3 key (timestamped
-          // filename), so the stale record is replaced rather than reused.
-          file = newFile;
-          await db.updateOrder(order.id, {
-            printFiles: [file],
-            pdfUrl: file.url,
-            printStatus: 'processing',
-            printGenerationStatus: 'success'
-          });
+          if (file && file.url) {
+            if (generatedFile.path !== onDisk) {
+              fs.renameSync(generatedFile.path, onDisk);
+            }
+          } else {
+            file = newFile;
+            await db.updateOrder(order.id, {
+              printFiles: [file],
+              pdfUrl: file.url,
+              printStatus: 'processing',
+              printGenerationStatus: 'success'
+            });
+          }
           console.log(`[PRINTER DOWNLOAD] Successfully generated and saved print file.`);
         } else {
           throw new Error('No template or images found to generate print file.');
@@ -366,60 +371,34 @@ async function handleBatchDownload(req, res) {
 
       // 1. Process customer uploaded photos
       const images = (order.images || []).filter(img => img && img.url);
-      for (const [idx, img] of images.entries()) {
+      images.forEach((img, idx) => {
         const photoNum = String(idx + 1).padStart(2, '0');
         const ext = path.extname(img.url.split('?')[0]) || '.jpg';
         const fileName = `${orderNum}_${skuRaw}_${photoNum}${ext}`;
-        const basename = path.basename(img.url.split('?')[0]);
-        const s3Key = img.url.split('?')[0].replace(/^\/uploads\//, '');
-        const fullPath = path.join(os.tmpdir(), 'prink-uploads', s3Key);
-
-        if (!fs.existsSync(fullPath)) {
-          try {
-            const { existsInS3, restoreFromS3 } = require('../utils/s3Storage');
-            const hasDbFile = await existsInS3(s3Key);
-            if (hasDbFile) {
-              await restoreFromS3(s3Key, fullPath);
-            }
-          } catch (restoreErr) {
-            console.error(`[BATCH DOWNLOAD] S3 restore failed for ${basename}:`, restoreErr.message);
-          }
-        }
+        const relativePath = img.url.replace(/^\//, '');
+        const fullPath = path.join(__dirname, '..', relativePath);
 
         if (fs.existsSync(fullPath)) {
           const content = fs.readFileSync(fullPath);
           zip.addFile(`${folderName}/${fileName}`, content);
           addedFileCount++;
         }
-      }
+      });
 
       // 2. Process generated print files / PDFs
-      const printFiles = (Array.isArray(order.printFiles) ? order.printFiles : []).filter(f => f && f.url);
-      for (const [idx, file] of printFiles.entries()) {
+      const printFiles = (order.printFiles || []).filter(f => f && f.url);
+      printFiles.forEach((file, idx) => {
         const ext = path.extname(file.url.split('?')[0]) || '.pdf';
         const fileName = `${orderNum}_${skuRaw}_PrintFile_${String(idx + 1).padStart(2, '0')}${ext}`;
-        const basename = path.basename(file.url.split('?')[0]);
-        const s3Key = file.url.split('?')[0].replace(/^\/uploads\//, '');
-        const fullPath = path.join(os.tmpdir(), 'prink-uploads', s3Key);
-
-        if (!fs.existsSync(fullPath)) {
-          try {
-            const { existsInS3, restoreFromS3 } = require('../utils/s3Storage');
-            const hasDbFile = await existsInS3(s3Key);
-            if (hasDbFile) {
-              await restoreFromS3(s3Key, fullPath);
-            }
-          } catch (restoreErr) {
-            console.error(`[BATCH DOWNLOAD] S3 restore failed for ${basename}:`, restoreErr.message);
-          }
-        }
+        const relativePath = file.url.replace(/^\//, '');
+        const fullPath = path.join(__dirname, '..', relativePath);
 
         if (fs.existsSync(fullPath)) {
           const content = fs.readFileSync(fullPath);
           zip.addFile(`${folderName}/${fileName}`, content);
           addedFileCount++;
         }
-      }
+      });
 
       // Advance order status to Printing if currently Pending or Print Ready
       if (['sent_to_printer', 'queued', 'pending'].includes(order.workflowStatus) || ['pending', 'queued'].includes(order.printStatus)) {
@@ -467,22 +446,23 @@ const handleStatusUpdate = async (req, res) => {
 
     const order = await db.getOrderById(req.params.id);
     if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
+
+    const currentIndex = STAGE_ORDER.indexOf(order.printStatus || 'pending');
+    const targetIndex = STAGE_ORDER.indexOf(transition.printStatus);
+
+    if (targetIndex !== -1 && currentIndex !== -1) {
+      if (targetIndex > currentIndex + 1) {
+        return res.status(409).json({
+          success: false,
+          code: 'INVALID_TRANSITION',
+          error: `Cannot skip production stages from ${order.printStatus} to ${transition.printStatus}.`
+        });
+      }
+    }
+
     const isApprovedOrUploaded = order.adminApprovalStatus === 'approved' || order.workflowStatus === 'photo_uploaded' || order.workflowStatus === 'approved' || order.workflowStatus === 'printing' || order.workflowStatus === 'ready_for_dispatch' || order.workflowStatus === 'in_transit' || order.workflowStatus === 'delivered' || order.requiresCustomization === false || order.customizationStatus === 'completed' || order.uploadStatus === 'ready';
     if (!isApprovedOrUploaded) {
       return res.status(403).json({ success: false, error: 'This order has not been approved for printing yet.' });
-    }
-
-    // Validate transition sequence limits
-    const currentPrintStatus = order.printStatus || 'pending';
-    const targetPrintStatus = transition.printStatus;
-    const currIdx = STAGE_ORDER.indexOf(currentPrintStatus);
-    const nextIdx = STAGE_ORDER.indexOf(targetPrintStatus);
-    if (currIdx !== -1 && nextIdx !== -1 && nextIdx > currIdx + 1) {
-      return res.status(409).json({
-        success: false,
-        code: 'INVALID_TRANSITION',
-        error: `Cannot skip production stages from "${currentPrintStatus}" to "${targetPrintStatus}".`
-      });
     }
 
     // Whitelisted fields only - the request body can never reach artwork fields.

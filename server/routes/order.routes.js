@@ -3,7 +3,7 @@ const router = express.Router();
 const db = require('../db');
 const { authMiddleware, adminMiddleware } = require('../middleware/auth.middleware');
 const { resolveTemplate } = require('../config/printTemplates');
-const { normalizeTransform } = require('../utils/designTransform');
+const { fromLegacyImage, normalizeTransform } = require('../utils/designTransform');
 const { generatePrintPdf, UPLOADS_DIR } = require('../utils/printRenderer');
 const { generateButterflyBoxPdf } = require('../utils/butterflyGenerator');
 const { allocateButterflyTemplate } = require('../services/butterflyAllocation.service');
@@ -27,7 +27,7 @@ router.get('/', adminMiddleware, async (req, res) => {
     const mongoose = require('mongoose');
     const Order = require('../models/Order');
     const page   = Math.max(1, parseInt(req.query.page)  || 1);
-    const limit  = Math.min(200, parseInt(req.query.limit) || 50);
+    const limit  = Math.min(10000, parseInt(req.query.limit) || 500);
     const status = req.query.status || '';
     const search = (req.query.search || '').trim();
 
@@ -53,11 +53,43 @@ router.get('/', adminMiddleware, async (req, res) => {
       });
     }
 
-    // ── Lightweight projection: exclude heavy embedded arrays from listing ──
-    // These fields (images, designData, printFiles, activityLogs, designRevisions)
-    // can be multi-MB per order. Fetching 50+ of them causes Vercel serverless
-    // function timeouts. They are fetched individually when a user opens a
-    // specific order detail view.
+    // Run all queries in parallel for speed — fetch full unstripped orders
+    const [orders, total, pending, ready, revision] = await Promise.all([
+      Order.find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Order.countDocuments(filter),
+      Order.countDocuments({ $and: [baseFilter, { customizationStatus: { $ne: 'completed' } }] }),
+      Order.countDocuments({ $and: [baseFilter, { uploadStatus: 'ready' }] }),
+      Order.countDocuments({ $and: [baseFilter, { uploadStatus: 'revision_requested' }] })
+    ]);
+
+    console.log('[ORDERS] Result: active orders returned:', orders.length, '| total active:', total, '| pending:', pending, '| ready:', ready);
+
+    return res.json({
+      orders,
+      pagination: { total, page, limit, pages: Math.ceil(total / limit) },
+      stats: { total, pending, ready, revision }
+    });
+  } catch (err) {
+    console.error('[GET /api/orders] Error:', err.message, err.stack);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * Recently *submitted* orders for the dashboard widget - not recently
+ * created. `designLockedAt` is set only when a customer confirms their
+ * design in the upload portal, so this reflects actual customer activity
+ * rather than however recently Shopify happened to sync the order.
+ */
+router.get('/recent-submissions', adminMiddleware, async (req, res) => {
+  try {
+    const Order = require('../models/Order');
+    const limit = Math.min(20, parseInt(req.query.limit) || 5);
+
     const listProjection = {
       images: 0,
       designData: 0,
@@ -68,47 +100,17 @@ router.get('/', adminMiddleware, async (req, res) => {
       customerApprovedImages: 0,
     };
 
-    // Run all queries in parallel for speed
-    const [orders, total, countAll, countReady, countPending, countApproved, countSentToPrinter, countProcessing, countCompleted, countRevision] = await Promise.all([
-      Order.find(filter, listProjection)
-        .sort({ createdAt: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .lean(),
-      Order.countDocuments(filter),
-      // ── Server-side tab counts (fast indexed countDocuments) ──
-      Order.countDocuments({}),
-      Order.countDocuments({ $or: [{ uploadStatus: 'ready' }, { customizationStatus: 'completed' }] }),
-      Order.countDocuments({ customizationStatus: { $ne: 'completed' }, uploadStatus: { $ne: 'ready' } }),
-      Order.countDocuments({ $or: [{ workflowStatus: 'approved' }, { adminApprovalStatus: 'approved', workflowStatus: { $nin: ['sent_to_printer', 'printer_processing', 'printing', 'completed', 'delivered'] } }] }),
-      Order.countDocuments({ workflowStatus: { $in: ['sent_to_printer', 'printing'] } }),
-      Order.countDocuments({ workflowStatus: 'printer_processing' }),
-      Order.countDocuments({ workflowStatus: { $in: ['completed', 'delivered', 'ready_for_dispatch'] } }),
-      Order.countDocuments({ uploadStatus: 'revision_requested' })
-    ]);
+    const orders = await Order.find({ designLockedAt: { $ne: null } }, listProjection)
+      .sort({ designLockedAt: -1 })
+      .limit(limit)
+      .lean();
 
-    console.log('[ORDERS] Result: returned:', orders.length, '| total:', total, '| all:', countAll, '| ready:', countReady, '| pending:', countPending);
-
-    return res.json({
-      orders,
-      pagination: { total, page, limit, pages: Math.ceil(total / limit) },
-      stats: { total, pending: countPending, ready: countReady, revision: countRevision },
-      tabCounts: {
-        all: countAll,
-        ready: countReady,
-        pending: countPending,
-        approved: countApproved,
-        sent_to_printer: countSentToPrinter + countProcessing,
-        completed: countCompleted,
-      }
-    });
+    res.json({ success: true, orders });
   } catch (err) {
-    console.error('[GET /api/orders] Error:', err.message, err.stack);
+    console.error('[GET /api/orders/recent-submissions] Error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
-
-
 
 
 // Alias for customer/orders (Filtered by customer token identity)
@@ -196,12 +198,41 @@ router.get('/customer/orders', authMiddleware(), async (req, res) => {
         global._shopifySyncCache[syncKey] = now;
 
         const shopifyService = require('../services/shopify.service');
-        const dummyMatch = userEmail ? userEmail.match(/^(\d+)@customer\.com$/) : null;
-        const queryParams = dummyMatch
-          ? { customer_id: dummyMatch[1], status: 'any' }
-          : { status: 'any', ...(userEmail ? { email: userEmail } : {}) };
+        let shopifyOrders = [];
+        const isDummyEmail = userEmail && userEmail.endsWith('@customer.com');
 
-        const shopifyOrders = await shopifyService.getOrdersFromShopify(shop, token, queryParams);
+        if (isDummyEmail || (!userEmail && userPhone)) {
+          const cleanPhone = (userPhone || userEmail.split('@')[0]).replace(/\D/g, '');
+          if (cleanPhone.length > 5) {
+            const searchQueries = [`phone:${cleanPhone}`, `phone:+${cleanPhone}`];
+            if (cleanPhone.length === 10) {
+              searchQueries.push(`phone:+91${cleanPhone}`);
+            }
+            for (const q of searchQueries) {
+              try {
+                const customers = await shopifyService.searchCustomersFromShopify(shop, token, { query: q });
+                if (Array.isArray(customers) && customers.length > 0) {
+                  for (const c of customers) {
+                    const orders = await shopifyService.getOrdersFromShopify(shop, token, { customer_id: c.id, status: 'any' });
+                    if (Array.isArray(orders)) {
+                      shopifyOrders = shopifyOrders.concat(orders);
+                    }
+                  }
+                  break;
+                }
+              } catch (searchErr) {
+                console.error(`[BG SYNC] Shopify customer search error for query "${q}":`, searchErr.message);
+              }
+            }
+          }
+        } else if (userEmail) {
+          try {
+            shopifyOrders = await shopifyService.getOrdersFromShopify(shop, token, { email: userEmail, status: 'any' });
+          } catch (err) {
+            console.error(`[BG SYNC] Shopify orders fetch by email error:`, err.message);
+          }
+        }
+
         if (Array.isArray(shopifyOrders) && shopifyOrders.length > 0) {
           for (const o of shopifyOrders) await shopifyService.syncOrderToDb(o);
           console.log(`[BG SYNC] Synced ${shopifyOrders.length} Shopify orders for ${userEmail || userPhone}`);
@@ -295,11 +326,10 @@ router.get('/:id', adminMiddleware, async (req, res) => {
   }
 });
 
-const ORIGINALS_DIR = path.join(UPLOADS_DIR, 'originals');
-const PREVIEWS_DIR = path.join(UPLOADS_DIR, 'previews');
-for (const dir of [ORIGINALS_DIR, PREVIEWS_DIR]) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-}
+const os = require('os');
+const isVercel = process.env.VERCEL === '1';
+const ORIGINALS_DIR = isVercel ? os.tmpdir() : path.join(UPLOADS_DIR, 'originals');
+const PREVIEWS_DIR = isVercel ? os.tmpdir() : path.join(UPLOADS_DIR, 'previews');
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, ORIGINALS_DIR),
@@ -393,23 +423,14 @@ router.post('/:id/upload', authMiddleware(), (req, res) => {
         .jpeg({ quality: 82 })
         .toFile(path.join(PREVIEWS_DIR, previewName));
 
-      // S3 is the only persistent store - await both saves so the upload isn't
-      // reported as successful until it's actually durably stored.
-      const previewPath = path.join(PREVIEWS_DIR, previewName);
-      const { saveToS3 } = require('../utils/s3Storage');
-      try {
-        await Promise.all([
-          saveToS3(`originals/${req.file.filename}`, req.file.path),
-          saveToS3(`previews/${previewName}`, previewPath)
-        ]);
-      } catch (s3Err) {
-        console.error('[S3 Order Upload Save Error]', s3Err);
-        fs.unlink(req.file.path, () => {});
-        fs.unlink(previewPath, () => {});
-        return res.status(502).json({ success: false, error: 'Failed to save your photo. Please try again.' });
-      }
-      fs.unlink(req.file.path, () => {});
-      fs.unlink(previewPath, () => {});
+      // Save both to GridFS in the background so the response is fast
+      const { saveToGridFS } = require('../utils/dbStorage');
+      saveToGridFS(req.file.filename, req.file.path).catch(gridfsErr => {
+        console.error('[GridFS Order Upload Save Error - Original]', gridfsErr);
+      });
+      saveToGridFS(previewName, path.join(PREVIEWS_DIR, previewName)).catch(gridfsErr => {
+        console.error('[GridFS Order Upload Save Error - Preview]', gridfsErr);
+      });
 
       const image = {
         id: `img_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
@@ -489,25 +510,29 @@ router.post('/:id/design', authMiddleware(), async (req, res) => {
             const matches = img.src.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
             if (matches && matches.length === 3) {
               const crypto = require('crypto');
+              const fs = require('fs');
+              const path = require('path');
               const buffer = Buffer.from(matches[2], 'base64');
               const ext = matches[1].split('/')[1] || 'png';
               const filename = 'orig_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex') + '.' + ext;
+              const os = require('os');
+              const isVercel = process.env.VERCEL === '1';
+              const uploadsDir = isVercel ? os.tmpdir() : path.join(__dirname, '..', 'uploads', 'originals');
+              if (!isVercel && !fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+              const filepath = path.join(uploadsDir, filename);
+              fs.writeFileSync(filepath, buffer);
               
-              // S3 is the only persistent store - upload the buffer directly,
-              // no disk touched at all, and skip this image if it doesn't land.
-              const { saveBufferToS3 } = require('../utils/s3Storage');
-              try {
-                await saveBufferToS3(`originals/${filename}`, buffer);
-              } catch (s3Err) {
-                console.error('[S3 Base64 Save Error]', s3Err);
-                continue;
-              }
+              // Save to GridFS for deployment persistence (in the background for fast response)
+              const { saveToGridFS } = require('../utils/dbStorage');
+              saveToGridFS(filename, filepath).catch(gridfsErr => {
+                console.error('[GridFS Base64 Save Error]', gridfsErr);
+              });
 
               processedImages.push({ ...img, src: '/uploads/originals/' + filename, url: '/uploads/originals/' + filename });
               continue;
             }
           } catch (e) {
-            console.error('Error saving base64 image to S3:', e);
+            console.error('Error saving base64 image to disk:', e);
           }
         }
         processedImages.push(img);
@@ -578,7 +603,7 @@ router.post('/:id/review', adminMiddleware, async (req, res) => {
     const crypto = require('crypto');
     const currentHash = crypto.createHash('sha256').update(JSON.stringify({ templateId, images: imageInfo })).digest('hex');
 
-    const isCached = existingOrder.designHash === currentHash && Array.isArray(existingOrder.printFiles) && existingOrder.printFiles.length > 0;
+    const isCached = existingOrder.designHash === currentHash && existingOrder.printFiles && existingOrder.printFiles.length > 0;
 
     const isReupload = action === 'request_reupload' || action === 'reupload';
 
@@ -597,7 +622,7 @@ router.post('/:id/review', adminMiddleware, async (req, res) => {
     if (isApproved) {
       if (isCached) {
         updates.printGenerationStatus = 'completed';
-        updates.pdfUrl = (Array.isArray(existingOrder.printFiles) && existingOrder.printFiles[0]) ? existingOrder.printFiles[0].url : null;
+        updates.pdfUrl = existingOrder.printFiles[0].url;
       } else {
         updates.designHash = currentHash;
         updates.printGenerationStatus = 'processing';
@@ -633,8 +658,17 @@ router.post('/:id/review', adminMiddleware, async (req, res) => {
           printFiles.push({ ...file, isMagazine: true });
         } else {
           const { generatePrintPdf } = require('../utils/printRenderer');
-          const file = await generatePrintPdf({ orderId: existingOrder.id, order: existingOrder, images, template });
-          printFiles.push(file);
+          const { fromLegacyImage } = require('../utils/designTransform');
+          for (const img of images) {
+            const file = await generatePrintPdf({
+              orderId: existingOrder.id,
+              order: existingOrder,
+              image: img,
+              template,
+              transform: img.transform || fromLegacyImage(img)
+            });
+            printFiles.push({ ...file, imageId: img.id });
+          }
         }
 
         const generated = printFiles.length > 0;
@@ -718,7 +752,7 @@ router.post('/:id/route-to-printer', adminMiddleware, async (req, res) => {
         error: 'Approve this design before routing it to the print queue.'
       });
     }
-    if (!Array.isArray(order.printFiles) || !order.printFiles.length) {
+    if (!(order.printFiles || []).length) {
       return res.status(409).json({
         success: false,
         error: 'This order has no print-ready file, so it cannot be routed to a printer.'
@@ -783,11 +817,16 @@ router.post('/:id/regenerate', adminMiddleware, async (req, res) => {
         failures.push({ error: err.message });
       }
     } else {
-      try {
-        const file = await generatePrintPdf({ orderId: order.id, order, images: order.images || [], template });
-        printFiles.push(file);
-      } catch (err) {
-        failures.push({ error: err.message });
+      for (const img of order.images) {
+        try {
+          const file = await generatePrintPdf({
+            orderId: order.id, order, image: img, template,
+            transform: img.transform || fromLegacyImage(img)
+          });
+          printFiles.push({ ...file, imageId: img.id });
+        } catch (err) {
+          failures.push({ imageId: img.id, error: err.message });
+        }
       }
     }
 
@@ -805,7 +844,7 @@ router.post('/:id/regenerate', adminMiddleware, async (req, res) => {
 
     const updated = await db.updateOrder(id, updateData);
     await db.addActivityLog(id, 'PDF_REGENERATED',
-      `Admin ${req.user?.email || ''} regenerated the print file.`);
+      `Admin ${req.user?.email || ''} regenerated the print file (${printFiles.length}/${order.images.length}).`);
 
     console.log(`[WORKFLOW LOG] STEP 13 - Admin Generated Production File for Order ${id}`);
 
@@ -899,16 +938,21 @@ router.post('/:id/submit-design', adminMiddleware, async (req, res) => {
         failures.push({ error: err.message });
       }
     } else {
-      try {
-        const file = await generatePrintPdf({ orderId: refreshed.id, order: refreshed, images: refreshed.images || [], template });
-        printFiles.push(file);
-      } catch (err) {
-        failures.push({ error: err.message });
+      for (const img of refreshed.images || []) {
+        try {
+          const file = await generatePrintPdf({
+            orderId: refreshed.id, order: refreshed, image: img, template,
+            transform: img.transform || fromLegacyImage(img)
+          });
+          printFiles.push({ ...file, imageId: img.id });
+        } catch (err) {
+          failures.push({ imageId: img.id, error: err.message });
+        }
       }
     }
 
     const finalOrder = await db.updateOrder(id, {
-      printFiles: printFiles.length ? printFiles : (Array.isArray(refreshed.printFiles) ? refreshed.printFiles : []),
+      printFiles: printFiles.length ? printFiles : refreshed.printFiles,
       pdfUrl: printFiles.length ? printFiles[0].url : refreshed.pdfUrl,
       printGenerationStatus: failures.length ? (printFiles.length ? 'partial' : 'failed') : 'completed',
       printGenerationErrors: failures,
@@ -980,7 +1024,7 @@ router.post('/:id/force-approve', adminMiddleware, async (req, res) => {
       });
     }
 
-    let printFiles = Array.isArray(order.printFiles) ? order.printFiles : [];
+    let printFiles = order.printFiles || [];
     if (!printFiles.length) {
       const template = resolveTemplate({
         sku: order.sku, productType: order.productType, productTitle: order.product
@@ -1011,11 +1055,16 @@ router.post('/:id/force-approve', adminMiddleware, async (req, res) => {
           console.error('[FORCE APPROVE RENDER ERROR]', id, err.message);
         }
       } else {
-        try {
-          const file = await generatePrintPdf({ orderId: order.id, order, images: order.images || [], template });
-          printFiles.push(file);
-        } catch (err) {
-          console.error('[FORCE APPROVE RENDER ERROR]', id, err.message);
+        for (const img of order.images) {
+          try {
+            const file = await generatePrintPdf({
+              orderId: order.id, order, image: img, template,
+              transform: img.transform || fromLegacyImage(img)
+            });
+            printFiles.push({ ...file, imageId: img.id });
+          } catch (err) {
+            console.error('[FORCE APPROVE RENDER ERROR]', id, err.message);
+          }
         }
       }
       if (!printFiles.length) {
@@ -1144,86 +1193,6 @@ router.delete('/:id', adminMiddleware, async (req, res) => {
   try {
     await db.deleteOrderById(req.params.id);
     res.json({ success: true, message: 'Order deleted' });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Delete a specific customer uploaded photo from an order
-router.delete('/:id/photos/:photoId', adminMiddleware, async (req, res) => {
-  try {
-    const { id, photoId } = req.params;
-    const Order = require('../models/Order');
-    const order = await Order.findOne({ id });
-    if (!order) {
-      return res.status(404).json({ success: false, error: 'Order not found' });
-    }
-    
-    // Find the image to optionally delete file from disk
-    const imageToDelete = order.images.find(img => img.id === photoId);
-    if (imageToDelete) {
-      // Unlink file if it exists locally
-      let origPath = imageToDelete.url;
-      let prevPath = imageToDelete.previewUrl;
-      
-      // Convert URL to filesystem path
-      if (origPath && origPath.startsWith('/uploads/')) {
-        const fullOrigPath = path.join(__dirname, '..', origPath);
-        fs.unlink(fullOrigPath, () => {});
-      }
-      if (prevPath && prevPath.startsWith('/uploads/')) {
-        const fullPrevPath = path.join(__dirname, '..', prevPath);
-        fs.unlink(fullPrevPath, () => {});
-      }
-    }
-
-    // Remove from database
-    order.images = order.images.filter(img => img.id !== photoId);
-    
-    // If no images left, update uploadStatus to pending
-    if (order.images.length === 0) {
-      order.uploadStatus = 'pending';
-      order.customizationStatus = 'pending';
-    }
-    
-    await order.save();
-    await db.addActivityLog(id, 'IMAGE_DELETED', `Admin deleted photo ${imageToDelete ? imageToDelete.name : photoId}.`);
-    
-    res.json({ success: true, order });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Delete all customer uploaded photos from an order
-router.delete('/:id/photos', adminMiddleware, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const Order = require('../models/Order');
-    const order = await Order.findOne({ id });
-    if (!order) {
-      return res.status(404).json({ success: false, error: 'Order not found' });
-    }
-
-    // Unlink files
-    for (const img of order.images) {
-      let origPath = img.url;
-      let prevPath = img.previewUrl;
-      if (origPath && origPath.startsWith('/uploads/')) {
-        fs.unlink(path.join(__dirname, '..', origPath), () => {});
-      }
-      if (prevPath && prevPath.startsWith('/uploads/')) {
-        fs.unlink(path.join(__dirname, '..', prevPath), () => {});
-      }
-    }
-
-    order.images = [];
-    order.uploadStatus = 'pending';
-    order.customizationStatus = 'pending';
-    await order.save();
-    await db.addActivityLog(id, 'IMAGES_CLEARED', `Admin cleared all uploaded photos.`);
-
-    res.json({ success: true, order });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

@@ -1,0 +1,7 @@
+server/uploads/*
+!server/uploads/.gitkeep
+node_modules
+.git
+.gemini
+*.log
+.env*
