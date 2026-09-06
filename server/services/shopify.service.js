@@ -202,22 +202,13 @@ const syncOrderToDb = async (o) => {
     year: 'numeric'
   });
 
+  const { detectProductType, isNonCustomizable, PHOTO_COUNT_BY_TYPE } = require('../utils/shopifyLineItemClassification');
+
   const lineItemsList = o.line_items || [];
   for (const item of lineItemsList) {
     const portalOrderId = `${o.name || '#' + o.order_number}-${item.id}`;
-    
-    let pType = 'canvas';
-    const titleLower = item.title.toLowerCase();
-    if (titleLower.includes('mug')) pType = 'mug';
-    else if (titleLower.includes('frame')) pType = 'frame';
-    else if (titleLower.includes('calendar')) pType = 'calendar';
-    else if (titleLower.includes('book') || titleLower.includes('photobook')) pType = 'photobook';
-    else if (titleLower.includes('magazine')) pType = 'magazine';
-    else if (titleLower.includes('butterfly')) pType = 'butterfly';
-    else if (titleLower.includes('tshirt') || titleLower.includes('t-shirt') || titleLower.includes('shirt')) pType = 'tshirt';
-    else if (titleLower.includes('pillow') || titleLower.includes('cushion')) pType = 'pillow';
-    else if (titleLower.includes('keychain') || titleLower.includes('key chain')) pType = 'keychain';
-    else if (titleLower.includes('mobilecase') || titleLower.includes('mobile case') || titleLower.includes('phone case')) pType = 'mobilecase';
+
+    const pType = detectProductType(item.title);
 
     // Fetch product image from synced ShopifyProduct if present
     let productImage = '';
@@ -231,21 +222,10 @@ const syncOrderToDb = async (o) => {
     }
 
     // ── Resolve customization requirements from SKU record ──────────────────
-    // Photo count per product type (fallback when SKU is not found in DB)
-    const photoCountByType = {
-      butterfly: 8, magazine: 4, photobook: 24,
-      calendar: 12, frame: 4, mug: 1, tshirt: 1,
-      mobilecase: 1, pillow: 1, keychain: 2, canvas: 1
-    };
-    // Non-customizable product identifiers (no photo upload needed)
-    // "gift wrap" is a distinct phrase from "gift card" - a common Shopify
-    // add-on line item that was previously falling through to customizable.
-    const nonCustomizableKeywords = ['gift card', 'gift-card', 'gift wrap', 'gift-wrap', 'giftwrap', 'voucher', 'shipping', 'donation'];
-    const skuLower = (item.sku || '').toLowerCase();
-    const isNonCustomizable = nonCustomizableKeywords.some(k => titleLower.includes(k) || skuLower.includes(k));
+    const nonCustomizable = isNonCustomizable(item.title, item.sku);
 
-    let requiresCustomization = !isNonCustomizable;
-    let requiredPhotoCount = isNonCustomizable ? 0 : (photoCountByType[pType] || 1);
+    let requiresCustomization = !nonCustomizable;
+    let requiredPhotoCount = nonCustomizable ? 0 : (PHOTO_COUNT_BY_TYPE[pType] || 1);
 
     try {
       const SKU = require('../models/SKU');
