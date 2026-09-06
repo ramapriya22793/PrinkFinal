@@ -94,7 +94,9 @@ export const isCustomizable = (o: any) => {
   if (o.requiresCustomization === true || (typeof o.requiredPhotoCount === 'number' && o.requiredPhotoCount > 0)) return true;
   const t = (o.productType || '').toLowerCase();
   const p = (o.product || '').toLowerCase();
-  const nonCustomizableKeywords = ['gift card', 'gift-card', 'voucher', 'shipping', 'donation'];
+  // "gift wrap" is a distinct phrase from "gift card" - a common Shopify
+  // add-on line item that was previously falling through to customizable.
+  const nonCustomizableKeywords = ['gift card', 'gift-card', 'gift wrap', 'gift-wrap', 'giftwrap', 'voucher', 'shipping', 'donation'];
   if (nonCustomizableKeywords.some(k => t.includes(k) || p.includes(k))) return false;
   return true;
 };
@@ -2627,12 +2629,22 @@ export default function CustomerPortal({
                     <UploadCloud style={{ width: 14, height: 14 }} /> Upload Photos
                   </button>
                   )}
-                  {activeOnly.length > 0 && isCustomizable(activeOnly[0]) && activeOnly[0].customizationStatus !== 'completed' && (
-                    <button className="btn" style={{ background: 'var(--primary)', color: '#FFFFFF', borderRadius: 12, padding: '8px 16px', fontSize: 13, border: 'none', display: 'flex', alignItems: 'center', gap: 6 }}
-                      onClick={() => loadSkuTemplate(activeOnly[0])}>
-                      <Palette style={{ width: 14, height: 14 }} /> Continue Design
-                    </button>
-                  )}
+                  {/* Only a shortcut when there's exactly one candidate - activeOnly[0]
+                      used to be opened unconditionally, so with more than one
+                      customizable order this could open the wrong product entirely
+                      (e.g. Butterfly Box vs. a Gift Wrap line item sorted first).
+                      With 2+ candidates, "Upload Photos" above already routes to the
+                      selection screen where the customer picks the right one. */}
+                  {(() => {
+                    const pendingCustomizable = activeOnly.filter(o => isCustomizable(o) && o.customizationStatus !== 'completed');
+                    if (pendingCustomizable.length !== 1) return null;
+                    return (
+                      <button className="btn" style={{ background: 'var(--primary)', color: '#FFFFFF', borderRadius: 12, padding: '8px 16px', fontSize: 13, border: 'none', display: 'flex', alignItems: 'center', gap: 6 }}
+                        onClick={() => loadSkuTemplate(pendingCustomizable[0])}>
+                        <Palette style={{ width: 14, height: 14 }} /> Continue Design
+                      </button>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
@@ -2776,7 +2788,7 @@ export default function CustomerPortal({
                                   style={{ borderRadius: 8, background: '#171C62', color: '#fff', border: 'none', fontWeight: 700 }} 
                                   onClick={() => { setActiveOrder(order); setWizardStep(2); setForceDashboard(false); setMobileNavOpen(false); }}
                                 >
-                                  <UploadCloud style={{ width: 14, height: 14 }} /> Upload Photos
+                                  <UploadCloud style={{ width: 14, height: 14 }} /> Upload {getRequiredPhotoCount(order)} Photo{getRequiredPhotoCount(order) === 1 ? '' : 's'}
                                 </button>
                               )}
                             </>
@@ -3062,7 +3074,7 @@ export default function CustomerPortal({
                                   style={{ borderRadius: 8, background: '#171C62', color: '#fff', border: 'none', fontWeight: 700 }}
                                   onClick={() => { setActiveOrder(order); setWizardStep(2); setForceDashboard(false); setMobileNavOpen(false); }}
                                 >
-                                  <i className="bi bi-cloud-upload" /> Upload Photos
+                                  <i className="bi bi-cloud-upload" /> Upload {getRequiredPhotoCount(order)} Photo{getRequiredPhotoCount(order) === 1 ? '' : 's'}
                                 </button>
                               )}
                             </>
@@ -3363,42 +3375,11 @@ export default function CustomerPortal({
                     <h2 className="wiz-section-title">Upload Your Photos</h2>
                     <p className="wiz-section-sub">Drop your photos here — we'll place them beautifully on your product.</p>
 
-                {activeOrder.productType === 'butterfly' && (
-                  <div style={{
-                    background: 'linear-gradient(to right, #eff6ff, #f8fafc)',
-                    border: '1px solid #bfdbfe',
-                    borderRadius: '12px',
-                    padding: '20px',
-                    marginBottom: '24px',
-                    boxShadow: '0 4px 12px rgba(59, 130, 246, 0.05)',
-                    color: '#1e3a8a',
-                    fontSize: '13.5px',
-                    lineHeight: '1.6'
-                  }}>
-                    <h4 style={{ margin: '0 0 12px 0', fontSize: '16px', fontWeight: 900, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <i className="bi bi-gift-fill" style={{ color: '#3b82f6' }}></i>
-                      The Prink's Butterfly Box
-                    </h4>
-                    <p style={{ margin: '0 0 16px 0' }}>
-                      Celebrate your favourite friendship with The Prink's Butterfly Box. Lift the lid and watch 8 flying butterflies take off over a shower of faux flowers, up to 8 of your favourite photos, and a handcrafted bouquet of wishes right at the heart. A triple-layer explosion gift box, handmade to hold your memories — and open a smile.
-                    </p>
-                    
-                    <strong style={{ display: 'block', marginBottom: '8px' }}>Product Details:</strong>
-                    <ul style={{ margin: '0 0 16px 0', paddingLeft: '24px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      <li><strong>8 Flying Butterfly Surprise</strong> (Reusable)</li>
-                      <li>Personalize upto <strong>8 photos</strong></li>
-                      <li>A <strong>triple layer Explosion Gift Box</strong> with Silver knob</li>
-                      <li>Faux Flowers Shower</li>
-                      <li>Handcrafted Bouquet of wishes in the center</li>
-                      <li>Box dimension - 15 cm x 15 cm x 17 cm</li>
-                      <li>Chocolates (Available as Add on)</li>
-                    </ul>
-                    
-                    <div style={{ background: '#dbeafe', padding: '12px', borderRadius: '8px', fontSize: '12px' }}>
-                      <strong>Note:</strong> You can add your personal gifts such as ring, watch or mobiles, which makes it even more special (after purchase).
-                    </div>
-                  </div>
-                )}
+                {/* The Prink's Butterfly Box product description card that used to
+                    render here was removed per client feedback: it added an extra
+                    read before the customer could get to uploading photos, and the
+                    functional "upload exactly N photos" instruction banner below
+                    already tells them what they need to know. */}
 
                 {/* Upload method pills */}
                 <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
