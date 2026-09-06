@@ -182,6 +182,47 @@ export default function CustomerPortal({
   const dragStartPos = useRef({ x: 0, y: 0 });
   const photoOffsetStart = useRef({ x: 0, y: 0 });
 
+  // photoOffsetX/Y above are raw drag-delta PIXELS relative to whichever
+  // mockup crop-box is currently rendered (each product type uses a
+  // different hardcoded box size). A plain ref (not state) so it survives
+  // the crop editor unmounting once the wizard moves past step 3 - it's
+  // read again at submit time in step 4/5, after the measured element is
+  // long gone. See buildCanonicalPhotoTransform below for why this exists.
+  const activeCropContainerSizeRef = useRef({ w: 1, h: 1 });
+  const measureCropContainer = (el: HTMLImageElement | null) => {
+    if (el && el.clientWidth > 0 && el.clientHeight > 0) {
+      activeCropContainerSizeRef.current = { w: el.clientWidth, h: el.clientHeight };
+    }
+  };
+
+  /**
+   * Converts the pixel-based crop editor state into the canonical fractional
+   * DesignTransform (see apps/customer/src/lib/designTransform.ts /
+   * server/utils/designTransform.js) that the print-file renderer expects.
+   *
+   * Without this conversion, the customer's zoom/rotate/drag never reaches
+   * the backend at all - images are submitted with no `transform` field, so
+   * server/routes/order.routes.js falls back to fromLegacyImage(img), which
+   * finds nothing usable and defaults to plain centered identity. The print
+   * file then ignores whatever the customer actually positioned. scale and
+   * rotation carry over unchanged (the editor already renders with
+   * object-fit:cover + CSS scale/rotate, which is exactly what
+   * computePlacement's cover-fit baseline assumes); only the pixel offsets
+   * need dividing by the actual on-screen crop-box size to become a
+   * resolution-independent fraction of the area.
+   */
+  const buildCanonicalPhotoTransform = () => {
+    const { w, h } = activeCropContainerSizeRef.current;
+    return {
+      scale: photoScale,
+      rotation: photoRotation,
+      offsetX: photoOffsetX / (w || 1),
+      offsetY: photoOffsetY / (h || 1),
+      brightness: 100,
+      contrast: 100
+    };
+  };
+
   const [is3DMode, setIs3DMode] = useState(true);
   const [isButterflyBoxClosed, setIsButterflyBoxClosed] = useState(true);
 
@@ -1149,6 +1190,14 @@ export default function CustomerPortal({
       } : undefined
     };
 
+    // Butterfly Box/Magazine have no working per-photo crop UI in this editor
+    // (see buildCanonicalPhotoTransform's doc comment) - only attach the
+    // canonical transform for product types the customer actually dragged/
+    // zoomed/rotated a photo in, so we never stamp an unrelated shared
+    // transform across their multiple photos.
+    const isButterflyOrMagazine = isButterfly(activeOrder) || isMagazine(activeOrder);
+    const canonicalTransform = isButterflyOrMagazine ? undefined : buildCanonicalPhotoTransform();
+
     try {
       const token = localStorage.getItem('customer_token');
       const payload = {
@@ -1160,8 +1209,9 @@ export default function CustomerPortal({
           src: img.url || img.src,
           url: img.url || img.src,
           previewUrl: img.previewUrl,
-          serverFilename: img.serverFilename || img.name
-        })) : (livePreviewPhoto ? [{ id: 'img_1', name: 'upload.jpg', src: livePreviewPhoto, url: livePreviewPhoto, serverFilename: 'upload.jpg' }] : [])
+          serverFilename: img.serverFilename || img.name,
+          ...(canonicalTransform ? { transform: canonicalTransform } : {})
+        })) : (livePreviewPhoto ? [{ id: 'img_1', name: 'upload.jpg', src: livePreviewPhoto, url: livePreviewPhoto, serverFilename: 'upload.jpg', ...(canonicalTransform ? { transform: canonicalTransform } : {}) }] : [])
       };
       
       const res = await fetch(`/api/orders/${encodeURIComponent(activeOrder.id)}/design`, {
@@ -3524,6 +3574,7 @@ export default function CustomerPortal({
                         </svg>
                         <div style={{ position: 'absolute', top: '75px', width: '64px', height: '85px', border: '1px dashed rgba(23,28,98,0.2)', overflow: 'hidden', background: '#fff', borderRadius: 2 }}>
                           <img src={livePreviewPhoto || images[0]?.src} alt="preview"
+                            ref={measureCropContainer}
                             style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, cursor: 'move', transition: isDraggingPhoto ? 'none' : 'transform 0.15s ease-out', width: '100%', height: '100%', objectFit: 'cover', userSelect: 'none', touchAction: 'none' }}
                             onMouseDown={e => { e.preventDefault(); setIsDraggingPhoto(true); dragStartPos.current = { x: e.clientX, y: e.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
                             onTouchStart={e => { setIsDraggingPhoto(true); const t = e.touches[0]; dragStartPos.current = { x: t.clientX, y: t.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
@@ -3537,6 +3588,7 @@ export default function CustomerPortal({
                         <div style={{ width: '130px', height: '140px', background: '#ffffff', borderRadius: '8px 8px 16px 16px', boxShadow: 'inset -20px 0 20px rgba(0,0,0,0.05), 0 8px 32px rgba(0,0,0,0.12)', border: '1px solid #eee', overflow: 'hidden', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           <div style={{ width: '100px', height: '110px', overflow: 'hidden', borderRadius: 4, position: 'relative', border: '1px dashed #ddd' }}>
                             <img src={livePreviewPhoto || images[0]?.src} alt="preview"
+                              ref={measureCropContainer}
                               style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, cursor: 'move', transition: isDraggingPhoto ? 'none' : 'transform 0.15s ease-out', width: '100%', height: '100%', objectFit: 'cover', userSelect: 'none', touchAction: 'none' }}
                               onMouseDown={e => { e.preventDefault(); setIsDraggingPhoto(true); dragStartPos.current = { x: e.clientX, y: e.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
                               onTouchStart={e => { setIsDraggingPhoto(true); const t = e.touches[0]; dragStartPos.current = { x: t.clientX, y: t.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
@@ -3556,6 +3608,7 @@ export default function CustomerPortal({
                         </div>
                         <div style={{ width: '100%', height: '100%', borderRadius: '18px', overflow: 'hidden', position: 'relative', background: '#fff' }}>
                           <img src={livePreviewPhoto || images[0]?.src} alt="preview"
+                            ref={measureCropContainer}
                             style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, cursor: 'move', transition: isDraggingPhoto ? 'none' : 'transform 0.15s ease-out', width: '100%', height: '100%', objectFit: 'cover', userSelect: 'none', touchAction: 'none' }}
                             onMouseDown={e => { e.preventDefault(); setIsDraggingPhoto(true); dragStartPos.current = { x: e.clientX, y: e.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
                             onTouchStart={e => { setIsDraggingPhoto(true); const t = e.touches[0]; dragStartPos.current = { x: t.clientX, y: t.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
@@ -3569,6 +3622,7 @@ export default function CustomerPortal({
                         <div style={{ width: '100%', height: '100%', background: '#f5f5f5', padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'inset 0 2px 5px rgba(0,0,0,0.1)' }}>
                           <div style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative', background: '#fff', boxShadow: 'inset 0 0 4px rgba(0,0,0,0.2)' }}>
                             <img src={livePreviewPhoto || images[0]?.src} alt="preview"
+                              ref={measureCropContainer}
                               style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, cursor: 'move', transition: isDraggingPhoto ? 'none' : 'transform 0.15s ease-out', width: '100%', height: '100%', objectFit: 'cover', userSelect: 'none', touchAction: 'none' }}
                               onMouseDown={e => { e.preventDefault(); setIsDraggingPhoto(true); dragStartPos.current = { x: e.clientX, y: e.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
                               onTouchStart={e => { setIsDraggingPhoto(true); const t = e.touches[0]; dragStartPos.current = { x: t.clientX, y: t.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
@@ -3582,6 +3636,7 @@ export default function CustomerPortal({
                       <div style={{ position: 'relative', width: '200px', height: '200px', background: '#fafafa', borderRadius: '36px', boxShadow: '0 10px 28px rgba(0,0,0,0.10), inset 0 0 20px rgba(0,0,0,0.06)', overflow: 'hidden', padding: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #f0f0f0' }}>
                         <div style={{ width: '100%', height: '100%', borderRadius: '24px', overflow: 'hidden', position: 'relative', border: '1px dashed #eee' }}>
                           <img src={livePreviewPhoto || images[0]?.src} alt="preview"
+                            ref={measureCropContainer}
                             style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, cursor: 'move', transition: isDraggingPhoto ? 'none' : 'transform 0.15s ease-out', width: '100%', height: '100%', objectFit: 'cover', userSelect: 'none', touchAction: 'none' }}
                             onMouseDown={e => { e.preventDefault(); setIsDraggingPhoto(true); dragStartPos.current = { x: e.clientX, y: e.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
                             onTouchStart={e => { setIsDraggingPhoto(true); const t = e.touches[0]; dragStartPos.current = { x: t.clientX, y: t.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
@@ -3598,6 +3653,7 @@ export default function CustomerPortal({
                         <div style={{ width: '120px', height: '120px', borderRadius: '50%', border: '6px solid rgba(255,255,255,0.7)', background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(2px)', boxShadow: '0 8px 24px rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
                           <div style={{ width: '100px', height: '100px', borderRadius: '50%', overflow: 'hidden', position: 'relative' }}>
                             <img src={livePreviewPhoto || images[0]?.src} alt="preview"
+                              ref={measureCropContainer}
                               style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, cursor: 'move', transition: isDraggingPhoto ? 'none' : 'transform 0.15s ease-out', width: '100%', height: '100%', objectFit: 'cover', userSelect: 'none', touchAction: 'none' }}
                               onMouseDown={e => { e.preventDefault(); setIsDraggingPhoto(true); dragStartPos.current = { x: e.clientX, y: e.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
                               onTouchStart={e => { setIsDraggingPhoto(true); const t = e.touches[0]; dragStartPos.current = { x: t.clientX, y: t.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
@@ -3615,6 +3671,7 @@ export default function CustomerPortal({
                         <div style={{ flex: 1, background: '#fff', padding: '10px' }}>
                           <div style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative', border: '1px dashed #ccc', borderRadius: 2 }}>
                             <img src={livePreviewPhoto || images[0]?.src} alt="preview"
+                              ref={measureCropContainer}
                               style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, cursor: 'move', transition: isDraggingPhoto ? 'none' : 'transform 0.15s ease-out', width: '100%', height: '100%', objectFit: 'cover', userSelect: 'none', touchAction: 'none' }}
                               onMouseDown={e => { e.preventDefault(); setIsDraggingPhoto(true); dragStartPos.current = { x: e.clientX, y: e.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
                               onTouchStart={e => { setIsDraggingPhoto(true); const t = e.touches[0]; dragStartPos.current = { x: t.clientX, y: t.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
@@ -3637,6 +3694,7 @@ export default function CustomerPortal({
                     {activeOrder.productType !== 'tshirt' && activeOrder.productType !== 'mug' && activeOrder.productType !== 'mobilecase' && activeOrder.productType !== 'frame' && activeOrder.productType !== 'pillow' && activeOrder.productType !== 'keychain' && activeOrder.productType !== 'photobook' && !isButterfly(activeOrder) && !isMagazine(activeOrder) && (!isButterfly(activeOrder) && !isMagazine(activeOrder)) && (
                       <div style={{ position: 'relative', width: '240px', height: '180px', borderRadius: 8, boxShadow: '0 8px 32px rgba(0,0,0,0.14), inset 0 0 0 4px #eee', overflow: 'hidden', background: '#fff' }}>
                         <img src={livePreviewPhoto || images[0]?.src} alt="preview"
+                          ref={measureCropContainer}
                           style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, cursor: 'move', transition: isDraggingPhoto ? 'none' : 'transform 0.15s ease-out', width: '100%', height: '100%', objectFit: 'cover', userSelect: 'none', touchAction: 'none' }}
                           onMouseDown={e => { e.preventDefault(); setIsDraggingPhoto(true); dragStartPos.current = { x: e.clientX, y: e.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
                           onTouchStart={e => { setIsDraggingPhoto(true); const t = e.touches[0]; dragStartPos.current = { x: t.clientX, y: t.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
