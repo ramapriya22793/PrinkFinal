@@ -238,8 +238,11 @@ const syncOrderToDb = async (o) => {
       mobilecase: 1, pillow: 1, keychain: 2, canvas: 1
     };
     // Non-customizable product identifiers (no photo upload needed)
-    const nonCustomizableKeywords = ['gift card', 'gift-card', 'voucher', 'shipping', 'donation'];
-    const isNonCustomizable = nonCustomizableKeywords.some(k => titleLower.includes(k));
+    // "gift wrap" is a distinct phrase from "gift card" - a common Shopify
+    // add-on line item that was previously falling through to customizable.
+    const nonCustomizableKeywords = ['gift card', 'gift-card', 'gift wrap', 'gift-wrap', 'giftwrap', 'voucher', 'shipping', 'donation'];
+    const skuLower = (item.sku || '').toLowerCase();
+    const isNonCustomizable = nonCustomizableKeywords.some(k => titleLower.includes(k) || skuLower.includes(k));
 
     let requiresCustomization = !isNonCustomizable;
     let requiredPhotoCount = isNonCustomizable ? 0 : (photoCountByType[pType] || 1);

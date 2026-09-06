@@ -43,7 +43,9 @@ async function processShopifyOrderWebhook(payload, topic = 'orders/create') {
   const quantity = firstItem.quantity || 1;
 
   // Customization Eligibility & Photo Count
-  const nonCustomizableKeywords = ['gift card', 'gift-card', 'voucher', 'shipping', 'donation'];
+  // "gift wrap" is a distinct phrase from "gift card" - a common Shopify
+  // add-on line item that was previously falling through to customizable.
+  const nonCustomizableKeywords = ['gift card', 'gift-card', 'gift wrap', 'gift-wrap', 'giftwrap', 'voucher', 'shipping', 'donation'];
   const pTitle = (productTitle || '').toLowerCase();
   const pSku = (sku || '').toLowerCase();
   const isNonCustomizable = nonCustomizableKeywords.some(k => pTitle.includes(k) || pSku.includes(k));
