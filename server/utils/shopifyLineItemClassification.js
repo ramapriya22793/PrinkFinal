@@ -36,8 +36,12 @@ const PHOTO_COUNT_BY_TYPE = {
   mobilecase: 1, pillow: 1, keychain: 2, canvas: 1
 };
 
-/** Line items matching these need no customer photo upload at all. */
-const NON_CUSTOMIZABLE_KEYWORDS = ['gift card', 'gift-card', 'voucher', 'shipping', 'donation'];
+/**
+ * Line items matching these need no customer photo upload at all.
+ * "gift wrap" is a distinct phrase from "gift card" - a common Shopify
+ * add-on line item that was previously falling through to customizable.
+ */
+const NON_CUSTOMIZABLE_KEYWORDS = ['gift card', 'gift-card', 'gift wrap', 'gift-wrap', 'giftwrap', 'voucher', 'shipping', 'donation'];
 
 /** Detect the internal product type from a line item's title. Defaults to 'canvas'. */
 function detectProductType(title) {
