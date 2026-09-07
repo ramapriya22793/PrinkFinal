@@ -3586,7 +3586,11 @@ export default function CustomerPortal({
                     {activeOrder.productType === 'mug' && (
                       <div style={{ position: 'relative', width: '220px', height: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <div style={{ width: '130px', height: '140px', background: '#ffffff', borderRadius: '8px 8px 16px 16px', boxShadow: 'inset -20px 0 20px rgba(0,0,0,0.05), 0 8px 32px rgba(0,0,0,0.12)', border: '1px solid #eee', overflow: 'hidden', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <div style={{ width: '100px', height: '110px', overflow: 'hidden', borderRadius: 4, position: 'relative', border: '1px dashed #ddd' }}>
+                          {/* Window sized to the mug's real 200x85mm wrap area
+                              (ratio ~2.35) - a wide band, not a near-square
+                              window, matching what's actually printed on the
+                              wrap. See server/config/printTemplates.js. */}
+                          <div style={{ width: '126px', height: '54px', overflow: 'hidden', borderRadius: 4, position: 'relative', border: '1px dashed #ddd' }}>
                             <img src={livePreviewPhoto || images[0]?.src} alt="preview"
                               ref={measureCropContainer}
                               style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, cursor: 'move', transition: isDraggingPhoto ? 'none' : 'transform 0.15s ease-out', width: '100%', height: '100%', objectFit: 'cover', userSelect: 'none', touchAction: 'none' }}
@@ -3619,8 +3623,13 @@ export default function CustomerPortal({
                     {/* FRAME */}
                     {activeOrder.productType === 'frame' && (
                       <div style={{ position: 'relative', width: '220px', height: '180px', background: '#3e2723', padding: '16px', borderRadius: '4px', boxShadow: '0 10px 36px rgba(0,0,0,0.25)', border: '1px solid #271511', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <div style={{ width: '100%', height: '100%', background: '#f5f5f5', padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'inset 0 2px 5px rgba(0,0,0,0.1)' }}>
-                          <div style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative', background: '#fff', boxShadow: 'inset 0 0 4px rgba(0,0,0,0.2)' }}>
+                        <div style={{ width: '100%', height: '100%', background: '#f5f5f5', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'inset 0 2px 5px rgba(0,0,0,0.1)' }}>
+                          {/* Window sized to the frame's real 203.2x254mm print area
+                              (ratio ~0.8), not the mat's own landscape shape - a
+                              portrait photo with a wide mat border either side is
+                              a normal picture-frame look, and it's what the print
+                              file actually is. See server/config/printTemplates.js. */}
+                          <div style={{ width: '99px', height: '124px', overflow: 'hidden', position: 'relative', background: '#fff', boxShadow: 'inset 0 0 4px rgba(0,0,0,0.2)' }}>
                             <img src={livePreviewPhoto || images[0]?.src} alt="preview"
                               ref={measureCropContainer}
                               style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, cursor: 'move', transition: isDraggingPhoto ? 'none' : 'transform 0.15s ease-out', width: '100%', height: '100%', objectFit: 'cover', userSelect: 'none', touchAction: 'none' }}
@@ -3692,13 +3701,20 @@ export default function CustomerPortal({
                     )}
                     {/* CANVAS / CALENDAR / GENERIC FALLBACK */}
                     {activeOrder.productType !== 'tshirt' && activeOrder.productType !== 'mug' && activeOrder.productType !== 'mobilecase' && activeOrder.productType !== 'frame' && activeOrder.productType !== 'pillow' && activeOrder.productType !== 'keychain' && activeOrder.productType !== 'photobook' && !isButterfly(activeOrder) && !isMagazine(activeOrder) && (!isButterfly(activeOrder) && !isMagazine(activeOrder)) && (
-                      <div style={{ position: 'relative', width: '240px', height: '180px', borderRadius: 8, boxShadow: '0 8px 32px rgba(0,0,0,0.14), inset 0 0 0 4px #eee', overflow: 'hidden', background: '#fff' }}>
-                        <img src={livePreviewPhoto || images[0]?.src} alt="preview"
-                          ref={measureCropContainer}
-                          style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, cursor: 'move', transition: isDraggingPhoto ? 'none' : 'transform 0.15s ease-out', width: '100%', height: '100%', objectFit: 'cover', userSelect: 'none', touchAction: 'none' }}
-                          onMouseDown={e => { e.preventDefault(); setIsDraggingPhoto(true); dragStartPos.current = { x: e.clientX, y: e.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
-                          onTouchStart={e => { setIsDraggingPhoto(true); const t = e.touches[0]; dragStartPos.current = { x: t.clientX, y: t.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
-                        />
+                      <div style={{ position: 'relative', width: '240px', height: '180px', padding: 12, borderRadius: 8, boxShadow: '0 8px 32px rgba(0,0,0,0.14), inset 0 0 0 4px #eee', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {/* Window sized to the canvas fallback template's real
+                            304.8x406.4mm print area (ratio 0.75) - also what
+                            pillow/keychain/photobook fall back to today since
+                            they have no dedicated template entry yet. See
+                            server/config/printTemplates.js. */}
+                        <div style={{ width: '117px', height: '156px', overflow: 'hidden', position: 'relative' }}>
+                          <img src={livePreviewPhoto || images[0]?.src} alt="preview"
+                            ref={measureCropContainer}
+                            style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, cursor: 'move', transition: isDraggingPhoto ? 'none' : 'transform 0.15s ease-out', width: '100%', height: '100%', objectFit: 'cover', userSelect: 'none', touchAction: 'none' }}
+                            onMouseDown={e => { e.preventDefault(); setIsDraggingPhoto(true); dragStartPos.current = { x: e.clientX, y: e.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
+                            onTouchStart={e => { setIsDraggingPhoto(true); const t = e.touches[0]; dragStartPos.current = { x: t.clientX, y: t.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
+                          />
+                        </div>
                       </div>
                     )}
                     {/* Drag hint */}
@@ -3829,11 +3845,14 @@ export default function CustomerPortal({
                               );
                             }
                             if (pType === 'mug') {
+                              // Same 126x54 -> 108x46 scale-down as the editor
+                              // window (both ratio ~2.35, matching the real
+                              // wrap area).
                               return (
                                 <div style={{ position: 'relative', width: '180px', height: '150px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                   <div style={{ width: '110px', height: '120px', background: '#ffffff', borderRadius: '8px 8px 14px 14px', boxShadow: 'inset -15px 0 15px rgba(0,0,0,0.04), 0 6px 24px rgba(0,0,0,0.1)', border: '1px solid #eee', overflow: 'hidden', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                    <div style={{ width: '85px', height: '95px', overflow: 'hidden', borderRadius: 4, position: 'relative', border: '1px dashed #eee' }}>
-                                      <img src={imgSrc} alt="mug layout" style={{ transform: `translate(${photoOffsetX * (85/100)}px,${photoOffsetY * (95/110)}px) scale(${photoScale}) rotate(${photoRotation}deg)`, width: '100%', height: '100%', objectFit: 'cover' }} />
+                                    <div style={{ width: '108px', height: '46px', overflow: 'hidden', borderRadius: 4, position: 'relative', border: '1px dashed #eee' }}>
+                                      <img src={imgSrc} alt="mug layout" style={{ transform: `translate(${photoOffsetX * (108/126)}px,${photoOffsetY * (46/54)}px) scale(${photoScale}) rotate(${photoRotation}deg)`, width: '100%', height: '100%', objectFit: 'cover' }} />
                                     </div>
                                   </div>
                                   <div style={{ position: 'absolute', right: '40px', top: '35px', width: '25px', height: '70px', border: '10px solid #ffffff', borderLeft: 'none', borderRadius: '0 30px 30px 0', boxShadow: '2px 4px 8px rgba(0,0,0,0.06)' }} />
@@ -3855,20 +3874,28 @@ export default function CustomerPortal({
                               );
                             }
                             if (pType === 'frame') {
+                              // Same 99x124 -> 85x106 scale-down as the editor
+                              // window (both ratio ~0.8, matching the real
+                              // print area), so this conversion factor is a
+                              // pure scale, not a shape change.
                               return (
                                 <div style={{ position: 'relative', width: '180px', height: '150px', background: '#3e2723', padding: '12px', borderRadius: '4px', boxShadow: '0 8px 28px rgba(0,0,0,0.2)', border: '1px solid #271511', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                  <div style={{ width: '100%', height: '100%', background: '#f5f5f5', padding: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'inset 0 1.5px 4px rgba(0,0,0,0.1)' }}>
-                                    <div style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative', background: '#fff', boxShadow: 'inset 0 0 3px rgba(0,0,0,0.15)' }}>
-                                      <img src={imgSrc} alt="frame layout" style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, width: '100%', height: '100%', objectFit: 'cover' }} />
+                                  <div style={{ width: '100%', height: '100%', background: '#f5f5f5', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'inset 0 1.5px 4px rgba(0,0,0,0.1)' }}>
+                                    <div style={{ width: '85px', height: '106px', overflow: 'hidden', position: 'relative', background: '#fff', boxShadow: 'inset 0 0 3px rgba(0,0,0,0.15)' }}>
+                                      <img src={imgSrc} alt="frame layout" style={{ transform: `translate(${photoOffsetX * (85/99)}px,${photoOffsetY * (106/124)}px) scale(${photoScale}) rotate(${photoRotation}deg)`, width: '100%', height: '100%', objectFit: 'cover' }} />
                                     </div>
                                   </div>
                                 </div>
                               );
                             }
-                            // Default canvas fallback
+                            // Default canvas fallback - 117x156 window, same
+                            // ratio (0.75) and coincidentally the same size as
+                            // the editor's, so no scale conversion is needed.
                             return (
-                              <div style={{ position: 'relative', width: '180px', height: '180px', padding: '12px', background: '#ffffff', border: '1px solid var(--border-color)', borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                                <img src={imgSrc} alt="canvas layout" style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, width: '100%', height: '100%', objectFit: 'cover' }} />
+                              <div style={{ position: 'relative', width: '180px', height: '180px', padding: '12px', background: '#ffffff', border: '1px solid var(--border-color)', borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <div style={{ width: '117px', height: '156px', overflow: 'hidden', position: 'relative' }}>
+                                  <img src={imgSrc} alt="canvas layout" style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, width: '100%', height: '100%', objectFit: 'cover' }} />
+                                </div>
                               </div>
                             );
                           })()
