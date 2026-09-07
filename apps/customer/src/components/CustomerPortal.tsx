@@ -722,6 +722,14 @@ export default function CustomerPortal({
   const [cropScale, setCropScale]   = useState(1);
   const [cropRot, setCropRot]       = useState(0);
 
+  // ── Photo review lightbox ────────────────────────────────────────────────────
+  // Lets a customer check any single uploaded photo at full size, with
+  // prev/next navigation across all of them - works the same regardless of
+  // how many photos the product needs (1 for a frame, 24 for a photobook),
+  // unlike the old flow where only the one auto-selected "live preview"
+  // photo was ever shown at a useful size.
+  const [reviewPhotoIdx, setReviewPhotoIdx] = useState<number | null>(null);
+
   // ── Contact Support Modal state ─────────────────────────────────────────────
   const [showSupportModal, setShowSupportModal] = useState(false);
 
@@ -1652,6 +1660,21 @@ export default function CustomerPortal({
     setImages(prev => { const a = [...prev]; const [m] = a.splice(dragIndex, 1); a.splice(idx, 0, m); return a; });
     setDragIndex(null);
   };
+  // Touch devices never fire the HTML5 drag events above (onDragStart/
+  // onDrop only fire for mouse-driven drags), so reordering silently did
+  // nothing on mobile. Rather than reimplementing drag physics for touch,
+  // this gives every thumbnail explicit move-left/move-right controls that
+  // work identically via tap or click - kept alongside the existing mouse
+  // drag (still nicer on desktop), not replacing it.
+  const moveImage = (idx: number, direction: -1 | 1) => {
+    const target = idx + direction;
+    setImages(prev => {
+      if (target < 0 || target >= prev.length) return prev;
+      const a = [...prev];
+      [a[idx], a[target]] = [a[target], a[idx]];
+      return a;
+    });
+  };
 
   const openCamera = async (mode: 'user' | 'environment' = facingMode) => {
     setCameraError(null);
@@ -1862,28 +1885,17 @@ export default function CustomerPortal({
     return fallbacks[order.productType || 'canvas'] || fallbacks.canvas;
   };
 
-  const getRequiredPhotoCount = (order: Order) => {
-    const type = order.productType || 'canvas';
-    const limits: Record<string, number> = {
-      tshirt: 1,
-      mug: 1,
-      mobilecase: 1,
-      frame: 4,
-      pillow: 1,
-      photobook: 24,
-      keychain: 2,
-      canvas: 1,
-      calendar: 12,
-      butterfly: 10,
-    };
-    return limits[type] || 1;
-  };
-
-  const getUploadedPhotoCount = (order: Order) => {
-    return order.images ? order.images.length : 0;
-  };
-
-
+  // getRequiredPhotoCount/getUploadedPhotoCount are NOT redefined here -
+  // this component uses the module-level exports above (which check the
+  // order's actual requiredPhotoCount from its SKU mapping first, falling
+  // back to a per-type table only when that's absent). A local const of the
+  // same name used to shadow them with a second, DIFFERENT hardcoded table
+  // (frame:4 vs the real 1, butterfly:10 vs the real 8) that never
+  // consulted the order's real requiredPhotoCount at all - the exact cause
+  // of "Photos Required: 1" on the dashboard card disagreeing with "this
+  // product requires 4 photo(s)" from the upload confirmation for the same
+  // order. See getRequiredPhotoCount's own definition near the top of this
+  // file for the single source of truth now used everywhere in this file.
 
   const handleOtpRequest = useCallback(async () => {
     if (!phone.trim()) { showToast('Please enter your phone number', 'warning'); return; }
@@ -3396,23 +3408,48 @@ export default function CustomerPortal({
                   ))}
                 </div>
 
-                {/* Drop zone */}
-                <div
-                  className={`wiz-upload-zone${dragOver ? ' dragover' : ''}`}
-                  onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-                  onDragLeave={() => setDragOver(false)}
-                  onDrop={e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files) addImages(e.dataTransfer.files); }}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                                    <div className="wiz-upload-zone-content">
-                    <i className="bi bi-cloud-arrow-up-fill wiz-upload-icon" />
-                    <div style={{ fontWeight: 900, fontSize: 24, color: 'var(--primary)', marginBottom: 8 }}>Drop your best photos here</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.6 }}>
-                    Supports <strong>JPG, PNG, HEIC, WEBP</strong>&nbsp;·&nbsp;Max 20MB per photo<br />
-                    Minimum <strong>300 DPI</strong> recommended for best print quality
-                  </div>
-                  </div>
-                </div>
+                {/* Drop zone - once enough photos are in, this switches from
+                    "please drop photos" (which used to keep showing even
+                    after the requirement was already met, per client
+                    feedback) to a clear success state. Still droppable/
+                    clickable underneath in case the customer wants to add
+                    more or swap one out. */}
+                {(() => {
+                  const requiredCount = getRequiredPhotoCount(activeOrder);
+                  const isSatisfied = requiredCount > 0 && images.length >= requiredCount;
+                  return (
+                    <div
+                      className={`wiz-upload-zone${dragOver ? ' dragover' : ''}${isSatisfied ? ' satisfied' : ''}`}
+                      onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+                      onDragLeave={() => setDragOver(false)}
+                      onDrop={e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files) addImages(e.dataTransfer.files); }}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <div className="wiz-upload-zone-content">
+                        {isSatisfied ? (
+                          <>
+                            <i className="bi bi-check-circle-fill wiz-upload-icon" style={{ color: 'var(--success)' }} />
+                            <div style={{ fontWeight: 900, fontSize: 24, color: 'var(--success)', marginBottom: 8 }}>
+                              Photos Uploaded Successfully!
+                            </div>
+                            <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                              All {requiredCount} photo{requiredCount === 1 ? '' : 's'} are in - use Submit below to continue, or click here to add/replace a photo.
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <i className="bi bi-cloud-arrow-up-fill wiz-upload-icon" />
+                            <div style={{ fontWeight: 900, fontSize: 24, color: 'var(--primary)', marginBottom: 8 }}>Drop your best photos here</div>
+                            <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.6 }}>
+                              Supports <strong>JPG, PNG, HEIC, WEBP</strong>&nbsp;·&nbsp;Max 20MB per photo<br />
+                              Minimum <strong>300 DPI</strong> recommended for best print quality
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Thumbnail strip & Live Preview */}
                 {images.length > 0 && (
@@ -3488,7 +3525,7 @@ export default function CustomerPortal({
                           onDrop={(e) => handleDropCard(e, idx)}
                           title="Drag to rearrange sequence"
                         >
-                          <img src={img.src} alt={img.name} />
+                          <img src={img.src} alt={img.name} onClick={() => setReviewPhotoIdx(idx)} />
                           {uploadProgress[img.id] !== undefined && uploadProgress[img.id] < 100 && (
                             <div className="wiz-upload-progress" style={{ position: 'absolute', bottom: 0, left: 0, right: 0, borderRadius: 0, margin: 0 }}>
                               <div className="wiz-upload-progress-fill" style={{ width: `${uploadProgress[img.id]}%` }} />
@@ -3497,6 +3534,26 @@ export default function CustomerPortal({
                           <button className="wiz-thumb-remove" onClick={e => { e.stopPropagation(); removeImage(img.id); }}>
                             <i className="bi bi-x" />
                           </button>
+                          {images.length > 1 && (
+                            <div className="wiz-thumb-move-row" onClick={e => e.stopPropagation()}>
+                              <button
+                                className="wiz-thumb-move"
+                                disabled={idx === 0}
+                                title="Move earlier in sequence"
+                                onClick={() => moveImage(idx, -1)}
+                              >
+                                <i className="bi bi-chevron-left" />
+                              </button>
+                              <button
+                                className="wiz-thumb-move"
+                                disabled={idx === images.length - 1}
+                                title="Move later in sequence"
+                                onClick={() => moveImage(idx, 1)}
+                              >
+                                <i className="bi bi-chevron-right" />
+                              </button>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -3904,14 +3961,17 @@ export default function CustomerPortal({
                         <i className={`bi ${productIcon(activeOrder.productType)}`} style={{ fontSize: 60, color: 'var(--accent)', opacity: 0.5 }} />
                       )}
                     </div>
-                    {/* Uploaded photos row */}
+                    {/* Uploaded photos row - the last chance to check each
+                        photo (not just the one product mockup above) before
+                        submitting, so every photo opens the same review
+                        lightbox the upload step uses. */}
                     {images.length > 0 && (
                       <div>
                         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 10 }}>Uploaded Photos ({images.length})</div>
                         <div className="wiz-thumb-strip">
-                          {images.map(img => (
+                          {images.map((img, idx) => (
                             <div key={img.id} className="wiz-thumb">
-                              <img src={img.src} alt={img.name} />
+                              <img src={img.src} alt={img.name} onClick={() => setReviewPhotoIdx(idx)} />
                             </div>
                           ))}
                         </div>
@@ -4866,10 +4926,72 @@ export default function CustomerPortal({
       </main>
 
       {/* =======================================================================
+          PHOTO REVIEW LIGHTBOX
+          Lets the customer check any uploaded photo at full size, with
+          prev/next navigation across all of them. Works identically no
+          matter how many photos the product needs - previously, only the
+          single auto-selected "live preview" photo was ever shown larger
+          than a small thumbnail.
+          ======================================================================= */}
+      {reviewPhotoIdx !== null && images[reviewPhotoIdx] && (
+        <div className="modal-overlay active" onClick={() => setReviewPhotoIdx(null)}>
+          <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 560 }}>
+            <div className="flex align-center justify-between" style={{ marginBottom: '1rem' }}>
+              <h2 style={{ fontWeight: 700, color: 'var(--primary)', margin: 0, fontSize: '1.1rem' }}>
+                Photo {reviewPhotoIdx + 1} of {images.length}
+              </h2>
+              <button className="btn btn-outline btn-sm" onClick={() => setReviewPhotoIdx(null)}><i className="bi bi-x-lg" /></button>
+            </div>
+
+            <div style={{ position: 'relative', borderRadius: 12, overflow: 'hidden', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 320 }}>
+              <img
+                src={images[reviewPhotoIdx].src}
+                alt={images[reviewPhotoIdx].name}
+                style={{ maxWidth: '100%', maxHeight: '70vh', display: 'block', margin: 'auto', objectFit: 'contain' }}
+              />
+              {images.length > 1 && (
+                <>
+                  <button
+                    className="btn btn-outline btn-sm"
+                    style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', borderRadius: '50%', width: 36, height: 36, padding: 0 }}
+                    disabled={reviewPhotoIdx === 0}
+                    onClick={() => setReviewPhotoIdx(i => (i === null ? i : i - 1))}
+                  >
+                    <i className="bi bi-chevron-left" />
+                  </button>
+                  <button
+                    className="btn btn-outline btn-sm"
+                    style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', borderRadius: '50%', width: 36, height: 36, padding: 0 }}
+                    disabled={reviewPhotoIdx === images.length - 1}
+                    onClick={() => setReviewPhotoIdx(i => (i === null ? i : i + 1))}
+                  >
+                    <i className="bi bi-chevron-right" />
+                  </button>
+                </>
+              )}
+            </div>
+
+            <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center' }}>
+              {images[reviewPhotoIdx].name}
+            </div>
+
+            <div className="flex gap-2" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
+              <button className="btn btn-outline" onClick={() => { removeImage(images[reviewPhotoIdx]!.id); setReviewPhotoIdx(null); }}>
+                <i className="bi bi-trash" /> Remove This Photo
+              </button>
+              <button className="btn btn-primary" onClick={() => setReviewPhotoIdx(null)}>
+                <i className="bi bi-check-lg" /> Looks Good
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =======================================================================
           CROP MODAL
           ======================================================================= */}
       {cropOpen && cropTarget && (
-        <div className="modal-overlay" onClick={() => setCropOpen(false)}>
+        <div className="modal-overlay active" onClick={() => setCropOpen(false)}>
           <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
             <div className="flex align-center justify-between" style={{ marginBottom: '1rem' }}>
               <h2 style={{ fontWeight: 700, color: 'var(--primary)', margin: 0, fontSize: '1.1rem' }}>Crop Image</h2>
@@ -4916,7 +5038,7 @@ export default function CustomerPortal({
           ORDER CONFIRMATION MODAL
           ======================================================================= */}
       {confirmOpen && (
-        <div className="modal-overlay" onClick={() => { if (!placingOrder) setConfirmOpen(false); }}>
+        <div className="modal-overlay active" onClick={() => { if (!placingOrder) setConfirmOpen(false); }}>
           <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
             <div className="flex align-center justify-between" style={{ marginBottom: '1rem' }}>
               <h2 style={{ fontWeight: 700, color: 'var(--primary)', margin: 0, fontSize: '1.1rem' }}>Confirm Your Order</h2>
@@ -4980,7 +5102,7 @@ export default function CustomerPortal({
       )}
       {/* Optional Customer Login Modal */}
       {showLoginModal && (
-        <div className="modal-overlay" onClick={() => setShowLoginModal(false)}>
+        <div className="modal-overlay active" onClick={() => setShowLoginModal(false)}>
           <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 440, width: '100%', padding: '24px 28px', borderRadius: 24 }}>
             <div className="flex align-center justify-between" style={{ marginBottom: '1.25rem' }}>
               <h2 style={{ fontWeight: 800, color: 'var(--primary)', margin: 0, fontSize: '1.2rem' }}>Customer Workspace</h2>
