@@ -325,7 +325,7 @@ async function generatePrintPdf({ orderId, order, image, template, transform }) 
   const filename = `THEPRINK_${safeOrderId}_${template.id}_${Date.now()}.pdf`;
   const outputPath = path.join(PRINT_DIR, filename);
 
-  await new Promise((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     // Page 1 is A4 for standard specification sheet, margins 36pt.
     const doc = new PDFDocument({
       size: 'A4',
@@ -442,33 +442,42 @@ async function generatePrintPdf({ orderId, order, image, template, transform }) 
 
     doc.end();
     stream.on('finish', async () => {
+      const stats = fs.statSync(outputPath);
+      // S3 is the only persistent store - a print file that only exists in
+      // this ephemeral temp/uploads dir is effectively lost the moment the
+      // server restarts, redeploys, or a different serverless instance
+      // handles the next request. Treat a failed save as a failed
+      // generation rather than reporting success with an unreachable file.
+      // The local copy is deliberately kept (not unlinked) after a
+      // successful upload - the /uploads serving middleware already checks
+      // local disk before falling back to S3, so this doubles as a free
+      // same-instance cache, and it means a test/dev environment where
+      // saveToS3 no-ops (no bucket configured) still has a real file to
+      // serve instead of silently deleting the only copy that exists.
       try {
-        const { saveToGridFS } = require('./dbStorage');
-        await saveToGridFS(filename, outputPath);
-      } catch (gridfsErr) {
-        console.error('[GridFS Print PDF Save Error]', gridfsErr);
+        const { saveToS3 } = require('./s3Storage');
+        await saveToS3(`print/${filename}`, outputPath);
+      } catch (s3Err) {
+        console.error('[S3 Print PDF Save Error]', s3Err);
+        return reject(s3Err);
       }
-      resolve();
+      resolve({
+        filename,
+        path: outputPath,
+        url: `/uploads/print/${filename}`,
+        bytes: stats.size,
+        widthMm: widthMm + bleedMm * 2,
+        heightMm: heightMm + bleedMm * 2,
+        dpi: raster.dpi,
+        effectiveDpi: raster.effectiveDpi,
+        belowMinimumDpi: raster.belowMinimumDpi,
+        colourSpace: 'RGB',
+        templateId: template.id,
+        generatedAt: new Date()
+      });
     });
     stream.on('error', reject);
   });
-
-  const stats = fs.statSync(outputPath);
-
-  return {
-    filename,
-    path: outputPath,
-    url: `/uploads/print/${filename}`,
-    bytes: stats.size,
-    widthMm: widthMm + bleedMm * 2,
-    heightMm: heightMm + bleedMm * 2,
-    dpi: raster.dpi,
-    effectiveDpi: raster.effectiveDpi,
-    belowMinimumDpi: raster.belowMinimumDpi,
-    colourSpace: 'RGB',
-    templateId: template.id,
-    generatedAt: new Date()
-  };
 }
 
 module.exports = {

@@ -125,7 +125,14 @@ router.delete('/:id', adminMiddleware, async (req, res) => {
     }
 
     const { existsInS3, deleteFromS3 } = require('../utils/s3Storage');
-    const s3Key = `assets/${req.params.id}`;
+    // Use the same sanitised basename as `target`, not the raw req.params.id -
+    // a traversal id like "../../../etc/passwd" survives decodeURIComponent
+    // as literal ".." segments, and while that can't escape S3's flat key
+    // namespace the way it could a real filesystem, sending it verbatim as a
+    // key still isn't inert: S3 rejects it with its own 400 (confirmed
+    // locally), not a clean 404, which existsInS3 doesn't treat as
+    // "not found" and instead rethrows.
+    const s3Key = `assets/${path.basename(target)}`;
     if (!(await existsInS3(s3Key))) {
       return res.status(404).json({ success: false, error: 'Asset not found' });
     }

@@ -47,7 +47,18 @@ const orderSchema = new mongoose.Schema({
   customizationStatus: { type: String, default: 'pending' },
   orderStatus: { type: String, default: 'Pending' }, // Pending -> Approved -> Printing -> Shipped -> Delivered
   adminApprovalStatus: { type: String, default: 'pending' }, // pending, approved, rejected
-  printStatus: { type: String, default: 'queued' }, // queued, printing, completed
+  // Defaults to 'pending', not 'queued' - printer.routes.js's own state
+  // machine (STAGE_ORDER/ALLOWED_TRANSITIONS/DASHBOARD_STATUS) treats
+  // 'queued' as "Print Ready", a status only earned after the customer has
+  // uploaded photos and an admin has approved the design (see
+  // order.routes.js's approve/generate-print-file flows, which explicitly
+  // set printStatus:'queued' at that point). Defaulting new orders straight
+  // to 'queued' put every order in the printer dashboard's Print Ready tab
+  // from the moment it was created - before any photo, design lock, or
+  // approval existed - which both hid genuinely ready orders in the noise
+  // and gave printers nothing to generate a file from.
+  printStatus: { type: String, default: 'pending' }, // pending, queued, processing, completed
+
 
   // ─── Unified Workflow Status ─────────────────────────────────────────────
   // Single source of truth for the 6-stage tracking flow shown across all portals:

@@ -238,7 +238,23 @@ router.get('/download/:id', printerAuth, async (req, res) => {
         onDisk = path.join(os.tmpdir(), path.basename(file.url));
       }
       if (!fs.existsSync(onDisk)) {
-        needsGeneration = true;
+        // The local copy is gone (server restart/redeploy/different
+        // serverless instance - the common case, not the exception, since
+        // S3 is the only persistent store for generated print files). Try
+        // restoring the existing file from S3 before falling back to
+        // regenerating it from scratch.
+        try {
+          const { existsInS3, restoreFromS3 } = require('../utils/s3Storage');
+          const s3Key = `print/${path.basename(file.url)}`;
+          if (await existsInS3(s3Key)) {
+            await restoreFromS3(s3Key, onDisk);
+          }
+        } catch (restoreErr) {
+          console.warn(`[PRINTER DOWNLOAD] S3 restore attempt failed for order ${order.id}:`, restoreErr.message);
+        }
+        if (!fs.existsSync(onDisk)) {
+          needsGeneration = true;
+        }
       }
     }
 
@@ -279,10 +295,15 @@ router.get('/download/:id', printerAuth, async (req, res) => {
             effectiveDpi: generatedFile.effectiveDpi
           };
 
-          if (file && file.url) {
-            if (generatedFile.path !== onDisk) {
-              fs.renameSync(generatedFile.path, onDisk);
-            }
+          // The generator already persisted the file to S3 (its sole
+          // durable store) and deletes its own local scratch copy once
+          // that upload succeeds - so generatedFile.path is frequently
+          // already gone by the time we get here. Renaming into the old
+          // `onDisk` slot only works if that scratch file still exists;
+          // otherwise just point the order at the newly generated file's
+          // own filename/URL instead of forcing it into the stale one.
+          if (file && file.url && generatedFile.path !== onDisk && fs.existsSync(generatedFile.path)) {
+            fs.renameSync(generatedFile.path, onDisk);
           } else {
             file = newFile;
             await db.updateOrder(order.id, {
