@@ -1232,7 +1232,7 @@ export default function CustomerPortal({
       });
       
       if (res.ok) {
-        showToast('Design submitted successfully! Status: Pending Admin Review.', 'success');
+        showToast('Design submitted successfully! Status: Order Under Process.', 'success');
         fetchActiveOrder(); // refresh list
         navTo('tracking'); // go to tracking
         return true;
@@ -1455,7 +1455,7 @@ export default function CustomerPortal({
       setSubmittedOrderId(activeOrder.id);
       setSubmissionDone(true);
       setSubView('tracking');
-      showToast('🎉 Design submitted! Admin will review shortly.', 'success');
+      showToast('🎉 Design submitted! Your order is now being processed for printing.', 'success');
     } catch (e: any) {
       if (isLiveMode) {
         showToast(e.message || 'Failed to submit design.', 'error');
@@ -2203,7 +2203,7 @@ export default function CustomerPortal({
     if (order.workflowStatus === 'sent_to_printer')    return <span className="badge badge-primary" style={{ background: '#dbeafe', color: '#1e40af', fontWeight: 700 }}><i className="bi bi-file-earmark-pdf" /> Sent to Printer Queue</span>;
     if (order.workflowStatus === 'approved')           return <span className="badge badge-success" style={{ background: '#dcfce7', color: '#15803d', fontWeight: 700 }}><i className="bi bi-patch-check-fill" /> Design Approved</span>;
     if (order.workflowStatus === 'rejected' || order.adminApprovalStatus === 'rejected') return <span className="badge badge-error" style={{ background: '#fee2e2', color: '#dc2626', fontWeight: 700 }}><i className="bi bi-x-circle-fill" /> Rejected — Re-upload Required</span>;
-    if (order.workflowStatus === 'photo_uploaded' || order.customizationStatus === 'completed' || order.designLockedAt) return <span className="badge badge-info" style={{ background: '#e0f2fe', color: '#0369a1', fontWeight: 700 }}><i className="bi bi-shield-fill-exclamation" /> Under Admin Review</span>;
+    if (order.workflowStatus === 'photo_uploaded' || order.customizationStatus === 'completed' || order.designLockedAt) return <span className="badge badge-info" style={{ background: '#e0f2fe', color: '#0369a1', fontWeight: 700 }}><i className="bi bi-hourglass-split" /> Order Under Process</span>;
     if (order.customizationStatus === 'in-progress') return <span className="badge badge-accent" style={{ fontWeight: 700 }}><i className="bi bi-palette" /> Editing Draft</span>;
     return <span className="badge badge-warning" style={{ background: '#fef3c7', color: '#d97706', fontWeight: 700 }}><i className="bi bi-hourglass-split" /> Awaiting Photos</span>;
   };
@@ -3252,7 +3252,7 @@ export default function CustomerPortal({
                     const pipeline = [
                       { title: 'Order Synced', log: orderPlacedLog || { time: activeOrder.date } },
                       { title: 'Photos Uploaded', log: photosUploadedLog },
-                      { title: 'Admin Approved', log: approvedLog },
+                      { title: 'In Production', log: approvedLog },
                       { title: 'Sent to Printer', log: printingLog },
                       { title: 'Fulfillment Completed', log: deliveredLog ? { time: 'Completed' } : null }
                     ];
@@ -3870,7 +3870,7 @@ export default function CustomerPortal({
             {wizardStep === 4 && activeOrder && (
               <div className={`wizard-panel${wizardDir === 'back' ? ' reverse' : ''}`}>
                 <h2 className="wiz-section-title">Review Your Design</h2>
-                <p className="wiz-section-sub">Look good? Submit it to our design team for review and printing.</p>
+                <p className="wiz-section-sub">Look good? Submit it and we'll get your order into printing.</p>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 300px', gap: 24, alignItems: 'start' }} className="responsive-two-col">
                   {/* Left: Preview */}
@@ -4003,7 +4003,7 @@ export default function CustomerPortal({
                     {/* Confidence chip */}
                     <div style={{ marginTop: 16, background: 'rgba(15,190,136,0.08)', border: '1px solid rgba(15,190,136,0.2)', borderRadius: 10, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
                       <i className="bi bi-shield-check" style={{ color: 'var(--success)', fontSize: 18 }} />
-                      <span style={{ color: '#0a8a62', fontWeight: 600 }}>Your design will be reviewed by our team within 24 hours before printing.</span>
+                      <span style={{ color: '#0a8a62', fontWeight: 600 }}>Once you submit, your photos go straight into our printing workflow.</span>
                     </div>
                   </div>
                 </div>
@@ -4056,7 +4056,7 @@ export default function CustomerPortal({
                 </div>
                 <h2 style={{ fontSize: 32, fontWeight: 900, color: 'var(--primary)', margin: '0 0 10px' }}>Design Submitted! 🎉</h2>
                 <p style={{ fontSize: 16, color: 'var(--text-secondary)', maxWidth: 480, lineHeight: 1.7, margin: '0 0 32px' }}>
-                  Your design has been sent to our creative team for review. We'll notify you once it's approved and sent to print.
+                  Your photos have been submitted and your order is now being processed for printing. We'll keep you posted with WhatsApp updates.
                 </p>
                 <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', justifyContent: 'center' }}>
                   <button className="wiz-btn-next" onClick={() => { navTo('tracking'); }}>
@@ -4454,7 +4454,7 @@ export default function CustomerPortal({
                   Your customization for <strong>{submittedOrderId || activeOrder?.product}</strong> has been submitted.
                 </p>
                 <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '0 0 24px' }}>
-                  Our design team will review and approve within 24 hours. You'll receive a WhatsApp notification once approved.
+                  Your photos are now with our print team. You'll receive a WhatsApp notification as your order moves through printing and dispatch.
                 </p>
                 {/* Status chips */}
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 24 }}>
@@ -4462,7 +4462,7 @@ export default function CustomerPortal({
                     ✓ Design Saved
                   </span>
                   <span className="badge badge-secondary">
-                    📋 Under Admin Review
+                    📋 Order Under Process
                   </span>
                   <span className="badge badge-secondary">
                     📱 WhatsApp Alert Queued
@@ -4514,8 +4514,8 @@ export default function CustomerPortal({
                   const wsLabels: Record<string, { label: string; color: string; bg: string }> = {
                     order_received:          { label: '🛒 Order Received',               color: '#0284c7', bg: '#e0f2fe' },
                     personalization_pending: { label: '📷 Personalization Pending',      color: '#d97706', bg: '#fef3c7' },
-                    photo_uploaded:          { label: '📷 Personalization Submitted',    color: '#0369a1', bg: '#e0f2fe' },
-                    approved:                { label: '✅ Admin Approved',               color: '#15803d', bg: '#dcfce7' },
+                    photo_uploaded:          { label: '🖨️ Printing',                    color: '#b45309', bg: '#fef3c7' },
+                    approved:                { label: '🖨️ Printing',                    color: '#b45309', bg: '#fef3c7' },
                     rejected:                { label: '❌ Rejected — Re-upload Required',color: '#dc2626', bg: '#fee2e2' },
                     sent_to_printer:         { label: '🖨️ Printing',                    color: '#1d4ed8', bg: '#dbeafe' },
                     printer_processing:      { label: '⚙️ Printing',                    color: '#b45309', bg: '#fef3c7' },
