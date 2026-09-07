@@ -39,7 +39,8 @@ export default function AdminUserManager() {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
-        setUsers(await res.json());
+        const data = await res.json();
+        setUsers(Array.isArray(data) ? data : data.users || []);
       } else {
         showToast('Failed to fetch users', 'error');
       }

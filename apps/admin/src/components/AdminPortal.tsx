@@ -209,8 +209,6 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
 
   // SKU Mappings States
   const [skuMappings, setSkuMappings] = useState<SkuMapping[]>([]);
-  const [showSkuModal, setShowSkuModal] = useState(false);
-  const [editingMapping, setEditingMapping] = useState<Partial<SkuMapping> | null>(null);
 
   // Database Templates States
   const [dbTemplates, setDbTemplates] = useState<TemplateItem[]>([]);
@@ -530,52 +528,6 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
       }
     } catch (err) {
       console.error('Failed to fetch settings:', err);
-    }
-  };
-
-  const saveSkuMapping = async () => {
-    if (!editingMapping?.sku || !editingMapping?.productType) {
-      showToast('SKU and Product Type are required.', 'warning');
-      return;
-    }
-    try {
-      const isNew = !editingMapping.id;
-      const url = isNew ? '/api/skus' : `/api/skus/${editingMapping.id}`;
-      const method = isNew ? 'POST' : 'PUT';
-      const res = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('admin_token')}`
-        },
-        body: JSON.stringify(editingMapping)
-      });
-      if (res.ok) {
-        showToast(`SKU Mapping ${isNew ? 'created' : 'updated'} successfully!`, 'success');
-        setShowSkuModal(false);
-        fetchSkuMappings();
-      } else {
-        const data = await res.json();
-        showToast(data.error || 'Failed to save SKU mapping.', 'error');
-      }
-    } catch (err) {
-      console.error('Error saving SKU mapping:', err);
-    }
-  };
-
-  const deleteSkuMapping = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this SKU mapping?')) return;
-    try {
-      const res = await fetch(`/api/skus/${id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('admin_token')}` }
-      });
-      if (res.ok) {
-        showToast('SKU Mapping deleted.', 'success');
-        fetchSkuMappings();
-      }
-    } catch (err) {
-      console.error('Error deleting SKU mapping:', err);
     }
   };
 
@@ -2911,81 +2863,6 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
         />
       ) : (
         <>
-        {/* =======================================================================
-            SKU RULES CONFIGURATION MODAL
-            ======================================================================= */}
-        {showSkuModal && editingMapping && (
-          <div className="modal-overlay active" onClick={() => setShowSkuModal(false)}>
-            <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 440 }}>
-              <div className="flex align-center justify-between" style={{ marginBottom: '1.25rem' }}>
-                <h2 className="font-bold" style={{ color: 'var(--primary)', margin: 0, fontSize: '1.1rem' }}>
-                  {editingMapping.id ? 'Edit SKU Rule Mapping' : 'Define New SKU Mapping'}
-                </h2>
-                <button className="btn btn-outline btn-sm" onClick={() => setShowSkuModal(false)}>
-                  <i className="bi bi-x-lg" />
-                </button>
-              </div>
-
-              <div className="flex flex-col gap-4">
-                <div>
-                  <label className="label text-xs font-semibold" htmlFor="mapping-sku" style={{ marginBottom: '0.2rem' }}>
-                    Shopify SKU Prefix / Match Code:
-                  </label>
-                  <input
-                    id="mapping-sku"
-                    className="input text-xs"
-                    type="text"
-                    placeholder="E.g. PRK-MUG-CLASSIC"
-                    value={editingMapping.sku || ''}
-                    onChange={e => setEditingMapping({ ...editingMapping, sku: e.target.value })}
-                  />
-                </div>
-
-                <div>
-                  <label className="label text-xs font-semibold" htmlFor="mapping-product" style={{ marginBottom: '0.2rem' }}>
-                    Mapped Product Canvas Type:
-                  </label>
-                  <select
-                    id="mapping-product"
-                    className="input text-xs"
-                    value={editingMapping.productType || 'mug'}
-                    onChange={e => setEditingMapping({ ...editingMapping, productType: e.target.value as any })}
-                  >
-                    <option value="mug">Coffee Mug Wrap</option>
-                    <option value="canvas">Stretch Canvas</option>
-                    <option value="frame">Photo Frame</option>
-                    <option value="calendar">Wall Calendar</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="label text-xs font-semibold" htmlFor="mapping-template" style={{ marginBottom: '0.2rem' }}>
-                    Associated Canva Design Template:
-                  </label>
-                  <select
-                    id="mapping-template"
-                    className="input text-xs"
-                    value={editingMapping.templateId || ''}
-                    onChange={e => setEditingMapping({ ...editingMapping, templateId: e.target.value })}
-                  >
-                    <option value="">None (Generic Blank Layout)</option>
-                    {(dbTemplates.length > 0 ? dbTemplates : TEMPLATES).map(t => (
-                      <option key={t.id} value={t.id}>{t.name} ({t.productType})</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="flex gap-2 justify-end" style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
-                  <button className="btn btn-secondary" onClick={() => setShowSkuModal(false)}>Cancel</button>
-                  <button className="btn btn-primary" onClick={saveSkuMapping}>
-                    Save Mapping Rule
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* =======================================================================
             TEMPLATES BUILDER CONFIGURATION MODAL
             ======================================================================= */}
