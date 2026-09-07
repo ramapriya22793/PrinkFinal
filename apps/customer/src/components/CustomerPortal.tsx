@@ -1455,7 +1455,7 @@ export default function CustomerPortal({
       setSubmittedOrderId(activeOrder.id);
       setSubmissionDone(true);
       setSubView('tracking');
-      showToast('🎉 Design submitted! Admin will review shortly.', 'success');
+      showToast('🎉 Design submitted! Your order is now being processed for printing.', 'success');
     } catch (e: any) {
       if (isLiveMode) {
         showToast(e.message || 'Failed to submit design.', 'error');
@@ -3252,7 +3252,7 @@ export default function CustomerPortal({
                     const pipeline = [
                       { title: 'Order Synced', log: orderPlacedLog || { time: activeOrder.date } },
                       { title: 'Photos Uploaded', log: photosUploadedLog },
-                      { title: 'Admin Approved', log: approvedLog },
+                      { title: 'In Production', log: approvedLog },
                       { title: 'Sent to Printer', log: printingLog },
                       { title: 'Fulfillment Completed', log: deliveredLog ? { time: 'Completed' } : null }
                     ];
@@ -3870,7 +3870,7 @@ export default function CustomerPortal({
             {wizardStep === 4 && activeOrder && (
               <div className={`wizard-panel${wizardDir === 'back' ? ' reverse' : ''}`}>
                 <h2 className="wiz-section-title">Review Your Design</h2>
-                <p className="wiz-section-sub">Look good? Submit it to our design team for review and printing.</p>
+                <p className="wiz-section-sub">Look good? Submit it and we'll get your order into printing.</p>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 300px', gap: 24, alignItems: 'start' }} className="responsive-two-col">
                   {/* Left: Preview */}
@@ -4003,7 +4003,7 @@ export default function CustomerPortal({
                     {/* Confidence chip */}
                     <div style={{ marginTop: 16, background: 'rgba(15,190,136,0.08)', border: '1px solid rgba(15,190,136,0.2)', borderRadius: 10, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
                       <i className="bi bi-shield-check" style={{ color: 'var(--success)', fontSize: 18 }} />
-                      <span style={{ color: '#0a8a62', fontWeight: 600 }}>Your design will be reviewed by our team within 24 hours before printing.</span>
+                      <span style={{ color: '#0a8a62', fontWeight: 600 }}>Once you submit, your photos go straight into our printing workflow.</span>
                     </div>
                   </div>
                 </div>
