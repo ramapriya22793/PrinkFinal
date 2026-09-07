@@ -2915,7 +2915,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
             SKU RULES CONFIGURATION MODAL
             ======================================================================= */}
         {showSkuModal && editingMapping && (
-          <div className="modal-overlay" onClick={() => setShowSkuModal(false)}>
+          <div className="modal-overlay active" onClick={() => setShowSkuModal(false)}>
             <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 440 }}>
               <div className="flex align-center justify-between" style={{ marginBottom: '1.25rem' }}>
                 <h2 className="font-bold" style={{ color: 'var(--primary)', margin: 0, fontSize: '1.1rem' }}>
@@ -2990,7 +2990,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
             TEMPLATES BUILDER CONFIGURATION MODAL
             ======================================================================= */}
         {showTemplateModal && editingTemplate && (
-          <div className="modal-overlay" onClick={() => setShowTemplateModal(false)}>
+          <div className="modal-overlay active" onClick={() => setShowTemplateModal(false)}>
             <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>
               <div className="flex align-center justify-between" style={{ marginBottom: '1.25rem' }}>
                 <h2 className="font-bold" style={{ color: 'var(--primary)', margin: 0, fontSize: '1.1rem' }}>
@@ -3091,7 +3091,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
         )}
         {/* Customer Uploaded Photos Pop-up Modal */}
         {activePhotosModalOrder && (
-          <div className="modal-overlay" onClick={() => setActivePhotosModalOrder(null)}>
+          <div className="modal-overlay active" onClick={() => setActivePhotosModalOrder(null)}>
             <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 900, width: '90vw' }}>
               <div className="flex align-center justify-between" style={{ marginBottom: '1.25rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem' }}>
                 <div>
