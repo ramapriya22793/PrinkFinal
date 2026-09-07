@@ -266,7 +266,12 @@ test('a printer cannot modify artwork', async () => {
 });
 
 test('a printer cannot set an arbitrary status or smuggle extra fields', async () => {
-  const { id } = await seedOrder({ adminApprovalStatus: 'approved' });
+  // printStatus must be seeded explicitly, matching what the real /review
+  // approve endpoint sets alongside adminApprovalStatus - orders no longer
+  // default to 'queued' (see server/models/Order.js), so a bare approved
+  // override would otherwise leave this order at 'pending' and correctly
+  // get rejected for skipping the print-ready stage.
+  const { id } = await seedOrder({ adminApprovalStatus: 'approved', printStatus: 'queued' });
 
   await request(app).post(`/api/printer/queue/${id}/status`)
     .set('Authorization', `Bearer ${tokenFor('printer')}`)

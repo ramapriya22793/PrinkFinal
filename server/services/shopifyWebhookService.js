@@ -138,7 +138,10 @@ async function processShopifyOrderWebhook(payload, topic = 'orders/create') {
       customizationStatus: existingOrder?.customizationStatus || 'pending',
       orderStatus: existingOrder?.orderStatus || 'Pending',
       adminApprovalStatus: existingOrder?.adminApprovalStatus || 'pending',
-      printStatus: existingOrder?.printStatus || 'queued',
+      // 'pending', not 'queued' - see server/models/Order.js's printStatus
+      // comment. A brand-new order has no photos, no approval, and no print
+      // file yet, so it shouldn't already show as "Print Ready".
+      printStatus: existingOrder?.printStatus || 'pending',
       deliveryStatus: existingOrder?.deliveryStatus || 'unfulfilled',
       shippingAddress: payload.shipping_address || {},
       trackingNumber,

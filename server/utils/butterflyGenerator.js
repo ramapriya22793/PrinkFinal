@@ -510,11 +510,12 @@ async function generateButterflyBoxPdf({ orderId, images, order, orderId2, image
       const stats = fs.statSync(outputPath);
       // S3 is the only persistent store - a print file that only exists in
       // this ephemeral temp dir is effectively lost, so treat a failed save
-      // as a failed generation rather than reporting success.
+      // as a failed generation rather than reporting success. The local
+      // copy is deliberately kept (not unlinked) after a successful upload -
+      // see server/utils/printRenderer.js's generatePrintPdf for why.
       try {
         const { saveToS3 } = require('./s3Storage');
         await saveToS3(`print/${filename}`, outputPath);
-        fs.unlink(outputPath, () => {});
       } catch (s3Err) {
         console.error('[S3 Butterfly Print PDF Save Error]', s3Err);
         return reject(s3Err);
