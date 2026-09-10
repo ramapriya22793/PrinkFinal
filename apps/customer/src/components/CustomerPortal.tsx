@@ -1232,7 +1232,7 @@ export default function CustomerPortal({
       });
       
       if (res.ok) {
-        showToast('Design submitted successfully! Status: Order Under Process.', 'success');
+        showToast('Photos submitted successfully! Status: Order Under Process.', 'success');
         fetchActiveOrder(); // refresh list
         navTo('tracking'); // go to tracking
         return true;
@@ -1455,7 +1455,7 @@ export default function CustomerPortal({
       setSubmittedOrderId(activeOrder.id);
       setSubmissionDone(true);
       setSubView('tracking');
-      showToast('🎉 Design submitted! Your order is now being processed for printing.', 'success');
+      showToast('🎉 Photos submitted successfully! Your order is now being processed for printing.', 'success');
     } catch (e: any) {
       if (isLiveMode) {
         showToast(e.message || 'Failed to submit design.', 'error');
@@ -1464,7 +1464,7 @@ export default function CustomerPortal({
         setSubmittedOrderId(activeOrder?.id || '');
         setSubmissionDone(true);
         setSubView('tracking');
-        showToast('Design submitted for admin review!', 'success');
+        showToast('Photos submitted successfully!', 'success');
       }
     }
   };
@@ -4054,9 +4054,9 @@ export default function CustomerPortal({
                 <div className="wiz-success-ring">
                   <i className="bi bi-check-lg" />
                 </div>
-                <h2 style={{ fontSize: 32, fontWeight: 900, color: 'var(--primary)', margin: '0 0 10px' }}>Design Submitted! 🎉</h2>
+                <h2 style={{ fontSize: 32, fontWeight: 900, color: 'var(--primary)', margin: '0 0 10px' }}>Photos Submitted Successfully! 🎉</h2>
                 <p style={{ fontSize: 16, color: 'var(--text-secondary)', maxWidth: 480, lineHeight: 1.7, margin: '0 0 32px' }}>
-                  Your photos have been submitted and your order is now being processed for printing. We'll keep you posted with WhatsApp updates.
+                  Your personalization details have been received and your order is now being processed for printing. We'll keep you posted with WhatsApp updates.
                 </p>
                 <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', justifyContent: 'center' }}>
                   <button className="wiz-btn-next" onClick={() => { navTo('tracking'); }}>
@@ -4449,9 +4449,9 @@ export default function CustomerPortal({
                 }}>
                   🎉
                 </div>
-                <h2 style={{ fontSize: 26, fontWeight: 800, margin: '0 0 8px', color: 'var(--primary)' }}>Design Submitted!</h2>
+                <h2 style={{ fontSize: 26, fontWeight: 800, margin: '0 0 8px', color: 'var(--primary)' }}>Photos Submitted Successfully! 🎉</h2>
                 <p style={{ fontSize: 14, color: 'var(--text-secondary)', margin: '0 0 6px' }}>
-                  Your customization for <strong>{submittedOrderId || activeOrder?.product}</strong> has been submitted.
+                  Your personalization details for <strong>{submittedOrderId || activeOrder?.product}</strong> have been received and your order is now being processed for printing.
                 </p>
                 <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '0 0 24px' }}>
                   Your photos are now with our print team. You'll receive a WhatsApp notification as your order moves through printing and dispatch.
