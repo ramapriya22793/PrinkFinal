@@ -321,6 +321,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
   const isFetchingCustomers = useRef(false);
   const isFetchingOrders = useRef(false);
   const isFetchingQueue = useRef(false);
+  const isFetchingRecentSubmissions = useRef(false);
 
   useEffect(() => {
     if (screen === 'login') emailRef.current?.focus();
@@ -422,6 +423,8 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
   // from fetchOrders: that list is sorted by order creation time, not by
   // when (or whether) the customer submitted a design.
   const fetchRecentSubmissions = async () => {
+    if (isFetchingRecentSubmissions.current) return;
+    isFetchingRecentSubmissions.current = true;
     try {
       const res = await fetch('/api/orders/recent-submissions?limit=5', {
         headers: { 'Authorization': 'Bearer ' + localStorage.getItem('admin_token') }
@@ -432,6 +435,8 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
       }
     } catch (err) {
       console.error('[fetchRecentSubmissions] Exception:', err);
+    } finally {
+      isFetchingRecentSubmissions.current = false;
     }
   };
 
@@ -1034,12 +1039,20 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
       if (orderTab === 'rejected') return o.adminApprovalStatus === 'rejected';
       return false;
     })
-    .filter(o =>
-      orderSearch.trim() === '' ||
-      o.id.toLowerCase().includes(orderSearch.toLowerCase()) ||
-      (typeof o.customer === 'object' ? (o.customer as any)?.name || 'Guest' : o.customer || 'Guest').toLowerCase().includes(orderSearch.toLowerCase()) ||
-      o.product.toLowerCase().includes(orderSearch.toLowerCase())
-    )
+    .filter(o => {
+      const q = orderSearch.trim().toLowerCase();
+      if (q === '') return true;
+      const customerName = typeof o.customer === 'object'
+        ? ((o.customer as any)?.name || 'Guest')
+        : (o.customer || 'Guest');
+      return [
+        o.id,
+        o.orderNumber,
+        (o as any).name,
+        customerName,
+        o.product,
+      ].some(v => String(v ?? '').toLowerCase().includes(q));
+    })
     .sort((a, b) => {
       const timeA = new Date(a.createdAt || a.date || 0).getTime();
       const timeB = new Date(b.createdAt || b.date || 0).getTime();
@@ -2072,9 +2085,9 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                 }
                 return monitorOrders.map(o => (
                   <div key={o.id} className="card p-4" style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', flexWrap: 'wrap' }}>
-                    <div className="avatar" style={{ width: 44, height: 44, fontSize: '1rem', flexShrink: 0 }}>{(typeof o.customer === 'object' ? (o.customer as any)?.name : o.customer || 'Guest')[0]}</div>
+                    <div className="avatar" style={{ width: 44, height: 44, fontSize: '1rem', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><i className="bi bi-box-seam" /></div>
                     <div style={{ flex: 1, minWidth: 160 }}>
-                      <div style={{ fontWeight: 600, color: 'var(--primary)', marginBottom: 2 }}>{typeof o.customer === 'object' ? (o.customer as any)?.name : o.customer || 'Guest'}</div>
+                      <div style={{ fontWeight: 600, color: 'var(--primary)', marginBottom: 2 }}>Order #{o.orderNumber || o.id}</div>
                       <div className="text-sm text-muted">{o.product}</div>
                       <div className="text-xs text-muted">{o.phone}</div>
                       {o.images && o.images.length > 0 && (
