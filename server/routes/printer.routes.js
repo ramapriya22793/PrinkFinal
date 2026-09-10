@@ -49,31 +49,11 @@ const ALLOWED_TRANSITIONS = {
 
 const STAGE_ORDER = ['pending', 'queued', 'processing', 'completed'];
 
-// Target vocabulary must match the frontend's PrintStatus type exactly
-// ('processing', not 'printing') - the workflowStatus override below already
-// used 'processing', so this previously produced two different labels for
-// the same conceptual state depending on which field drove it. Orders
-// reaching 'processing' only through printStatus (never via a
-// printer_processing workflowStatus) were silently invisible in the
-// printer app's "Printing" tab, since nothing there checks for 'printing'.
-const DASHBOARD_STATUS = {
-  pending:       'pending',
-  queued:        'print-ready',
-  'print-ready': 'print-ready',
-  ready:         'print-ready',
-  processing:    'processing',
-  printing:      'processing',
-  completed:     'completed'
-};
-
-/** Derive the frontend's PrintStatus vocabulary from the stored fields. */
-function deriveDashStatus(printStatus, workflowStatus) {
-  let dashStatus = DASHBOARD_STATUS[printStatus] || 'pending';
-  if (workflowStatus === 'sent_to_printer') dashStatus = 'pending';
-  else if (workflowStatus === 'printer_processing') dashStatus = 'processing';
-  else if (workflowStatus === 'completed') dashStatus = 'completed';
-  return dashStatus;
-}
+// deriveDashStatus (order -> 'pending'|'print-ready'|'processing'|'completed')
+// lives in server/utils/orderStatus.js so the admin app, the printer app and
+// any migration all agree on what "Print Ready" means. It requires a
+// genuinely approved + rendered job, not just printStatus:'queued'.
+const { deriveDashStatus } = require('../utils/orderStatus');
 
 function serializeQueueItem(o) {
   const filesArray = Array.isArray(o.printFiles) ? o.printFiles : [];
@@ -88,7 +68,7 @@ function serializeQueueItem(o) {
     sku: o.sku,
     quantity: o.quantity,
     templateId: o.templateId,
-    status: deriveDashStatus(o.printStatus, o.workflowStatus),
+    status: deriveDashStatus(o),
     printStatus: o.printStatus,
     workflowStatus: o.workflowStatus,
     orderStatus: o.orderStatus,
@@ -131,6 +111,7 @@ router.get('/queue', printerAuth, async (req, res) => {
 
     const lightProjection = {
       _id: 0, id: 1, orderNumber: 1, printStatus: 1, workflowStatus: 1,
+      adminApprovalStatus: 1, printGenerationStatus: 1, deliveryStatus: 1,
       product: 1, sku: 1, createdAt: 1,
       'customer.name': 1, 'customer.email': 1
     };
@@ -139,7 +120,7 @@ router.get('/queue', printerAuth, async (req, res) => {
     const tabCounts = { all: light.length, pending: 0, 'print-ready': 0, processing: 0, completed: 0 };
     const matches = [];
     for (const o of light) {
-      const dashStatus = deriveDashStatus(o.printStatus, o.workflowStatus);
+      const dashStatus = deriveDashStatus(o);
       if (tabCounts[dashStatus] !== undefined) tabCounts[dashStatus]++;
 
       if (status && status !== 'all' && dashStatus !== status) continue;
