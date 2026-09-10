@@ -7,11 +7,39 @@ interface AdminSKUManagerProps {
   showToast: (msg: string, type: 'success'|'error'|'info'|'warning') => void;
 }
 
+interface ShopifyCatalogEntry {
+  sku: string;
+  productTitle: string;
+  variantTitle: string;
+  shopifyProductType: string;
+}
+
 export default function AdminSKUManager({ skuMappings, refreshMappings, showToast }: AdminSKUManagerProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<Partial<SkuMapping>>({});
   const [search, setSearch] = useState('');
-  
+  const [shopifyCatalog, setShopifyCatalog] = useState<ShopifyCatalogEntry[]>([]);
+
+  // Load the SKU list from the synced Shopify catalogue so the form's SKU
+  // field can offer real options instead of being free-text-only. The input
+  // stays typeable, so a SKU that isn't in Shopify yet can still be entered.
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = localStorage.getItem('admin_token');
+        const res = await fetch('/api/skus/shopify-catalog', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setShopifyCatalog(Array.isArray(data.catalog) ? data.catalog : []);
+        }
+      } catch {
+        /* offline / not synced — form falls back to free-text SKU entry */
+      }
+    })();
+  }, []);
+
   const handleEdit = (sku: SkuMapping) => {
     setFormData(sku);
     setIsEditing(true);
@@ -126,8 +154,33 @@ export default function AdminSKUManager({ skuMappings, refreshMappings, showToas
           <h2 style={{ marginBottom: '1rem' }}>{formData.id ? 'Edit SKU Mapping Rule' : 'Add New SKU Mapping Rule'}</h2>
           <form onSubmit={handleSave} className="grid grid-2 gap-4" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
             <div className="form-group">
-              <label>1. Shopify SKU Code * (e.g. ABC123)</label>
-              <input type="text" className="form-control" required placeholder="e.g. ABC123" value={formData.sku || ''} onChange={e => setFormData({...formData, sku: e.target.value})} />
+              <label>1. Shopify SKU Code *{shopifyCatalog.length > 0 ? ` (${shopifyCatalog.length} from Shopify)` : ' (run Shopify Sync to load options)'}</label>
+              <input
+                type="text"
+                className="form-control"
+                required
+                list="shopify-sku-options"
+                placeholder="Pick from Shopify or type a SKU"
+                value={formData.sku || ''}
+                onChange={e => {
+                  const sku = e.target.value.trim();
+                  const match = shopifyCatalog.find(c => c.sku.toLowerCase() === sku.toLowerCase());
+                  setFormData(prev => ({
+                    ...prev,
+                    sku: e.target.value,
+                    // auto-fill the product name from Shopify when it's a known
+                    // SKU and the admin hasn't already typed a name
+                    name: match && !prev.name ? match.productTitle : prev.name,
+                  }));
+                }}
+              />
+              <datalist id="shopify-sku-options">
+                {shopifyCatalog.map(c => (
+                  <option key={c.sku} value={c.sku}>
+                    {c.productTitle}{c.variantTitle ? ` — ${c.variantTitle}` : ''}
+                  </option>
+                ))}
+              </datalist>
             </div>
             <div className="form-group">
               <label>Product Name *</label>
