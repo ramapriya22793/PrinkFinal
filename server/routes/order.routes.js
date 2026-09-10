@@ -8,6 +8,7 @@ const { generatePrintPdf, UPLOADS_DIR } = require('../utils/printRenderer');
 const { generateButterflyBoxPdf } = require('../utils/butterflyGenerator');
 const { allocateButterflyTemplate } = require('../services/butterflyAllocation.service');
 const { generateMagazinePdf } = require('../utils/magazineGenerator');
+const { reconcileWorkflowStatus } = require('../utils/orderStatus');
 const multer = require('multer');
 const sharp = require('sharp');
 const crypto = require('crypto');
@@ -649,9 +650,14 @@ router.post('/:id/review', adminMiddleware, async (req, res) => {
       if (isCached) {
         updates.printGenerationStatus = 'completed';
         updates.pdfUrl = existingOrder.printFiles[0].url;
+        // Print file already exists - route straight to the printer queue.
+        updates.workflowStatus = 'sent_to_printer';
+        updates.printerAssignedAt = new Date();
       } else {
         updates.designHash = currentHash;
         updates.printGenerationStatus = 'processing';
+        // stays 'approved'; runReviewGeneration promotes it to
+        // 'sent_to_printer' once the background render succeeds.
       }
     }
 
@@ -698,19 +704,26 @@ router.post('/:id/review', adminMiddleware, async (req, res) => {
         }
 
         const generated = printFiles.length > 0;
-        await Order.updateOne({ id }, {
-          $set: {
-            printFiles,
-            pdfUrl: generated ? printFiles[0].url : null,
-            printGenerationStatus: generated ? 'completed' : 'failed'
-          }
-        });
+        const genSet = {
+          printFiles,
+          pdfUrl: generated ? printFiles[0].url : null,
+          printGenerationStatus: generated ? 'completed' : 'failed'
+        };
+        // A successful render is the last thing standing between an approved
+        // design and the printer queue, so route it there automatically -
+        // no separate manual "Route to Printer" click needed on the happy path.
+        if (generated && isApproved) {
+          genSet.workflowStatus = 'sent_to_printer';
+          genSet.printStatus = 'queued';
+          genSet.printerAssignedAt = new Date();
+        }
+        await Order.updateOne({ id }, { $set: genSet });
 
         await db.addActivityLog(
           id,
           generated ? 'PDF_GENERATED' : 'PDF_FAILED',
           generated
-            ? `Print file generated (${printFiles.length} of ${images.length}) in background.`
+            ? `Print file generated (${printFiles.length} of ${images.length})${genSet.workflowStatus === 'sent_to_printer' ? ' and routed to the print queue' : ''} in background.`
             : 'Print file generation failed in background.'
         );
         return printFiles;
@@ -977,7 +990,7 @@ router.post('/:id/submit-design', adminMiddleware, async (req, res) => {
       }
     }
 
-    const finalOrder = await db.updateOrder(id, {
+    const submitUpdates = {
       printFiles: printFiles.length ? printFiles : refreshed.printFiles,
       pdfUrl: printFiles.length ? printFiles[0].url : refreshed.pdfUrl,
       printGenerationStatus: failures.length ? (printFiles.length ? 'partial' : 'failed') : 'completed',
@@ -986,7 +999,11 @@ router.post('/:id/submit-design', adminMiddleware, async (req, res) => {
       orderStatus: 'Approved',
       adminApprovalStatus: 'approved',
       printerAssignedAt: new Date()
-    });
+    };
+    // Keep workflowStatus consistent with the sub-fields we just wrote,
+    // instead of leaving it stuck at whatever the customer submit set.
+    submitUpdates.workflowStatus = reconcileWorkflowStatus({ ...refreshed, ...submitUpdates });
+    const finalOrder = await db.updateOrder(id, submitUpdates);
 
     await db.addActivityLog(id, 'ADMIN_EDITED_DESIGN', 'An administrator edited the design layout or photos.');
     
@@ -1109,7 +1126,8 @@ router.post('/:id/force-approve', adminMiddleware, async (req, res) => {
       printFiles,
       pdfUrl: printFiles[0].url
     };
-    
+    updateData.workflowStatus = reconcileWorkflowStatus({ ...order, ...updateData });
+
     await db.addActivityLog(id, 'PDF_REGENERATED', `An administrator generated a new production print file.`);
 
     const updated = await db.updateOrder(id, updateData);
@@ -1196,13 +1214,21 @@ router.post('/:id/notify', adminMiddleware, async (req, res) => {
 // Admin only - anyone could otherwise drive any order to any status.
 router.patch('/:id/status', adminMiddleware, async (req, res) => {
   try {
-    const { status, orderStatus, printStatus, deliveryStatus } = req.body;
+    const { status, orderStatus, printStatus, deliveryStatus, workflowStatus } = req.body;
     const updates = {};
 
     if (orderStatus) updates.orderStatus = orderStatus;
     if (status) updates.orderStatus = status;
     if (printStatus) updates.printStatus = printStatus;
     if (deliveryStatus) updates.deliveryStatus = deliveryStatus;
+    if (workflowStatus) updates.workflowStatus = workflowStatus;
+
+    // Keep workflowStatus in sync with whatever sub-field just changed, unless
+    // the caller set it explicitly.
+    if (!workflowStatus && Object.keys(updates).length > 0) {
+      const existing = await db.getOrderById(req.params.id);
+      if (existing) updates.workflowStatus = reconcileWorkflowStatus({ ...existing, ...updates });
+    }
 
     const order = await db.updateOrder(req.params.id, updates);
     if (orderStatus || status) {
