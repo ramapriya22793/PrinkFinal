@@ -931,6 +931,44 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
       setIsRoutingToPrinter(false);
   };
 
+  // Shopify's fulfillment webhook flags a shipped/delivered signal on the
+  // order (pendingDeliveryUpdate) but never applies it automatically -
+  // Shopify data can be wrong or premature, so an admin confirms or
+  // dismisses it explicitly.
+  const confirmDeliveryUpdate = async (order: Order) => {
+    try {
+      const res = await fetch(`/api/orders/${encodeURIComponent(order.id)}/confirm-delivery-update`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('admin_token')}` }
+      });
+      if (res.ok) {
+        showToast(`Order ${order.orderNumber || order.id} marked ${order.pendingDeliveryUpdate?.status}.`, 'success');
+        fetchOrders();
+      } else {
+        showToast('Failed to confirm the delivery update.', 'error');
+      }
+    } catch (err) {
+      showToast('Network error confirming the delivery update.', 'error');
+    }
+  };
+
+  const dismissDeliveryUpdate = async (order: Order) => {
+    try {
+      const res = await fetch(`/api/orders/${encodeURIComponent(order.id)}/dismiss-delivery-update`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('admin_token')}` }
+      });
+      if (res.ok) {
+        showToast('Dismissed.', 'info');
+        fetchOrders();
+      } else {
+        showToast('Failed to dismiss the delivery update.', 'error');
+      }
+    } catch (err) {
+      showToast('Network error dismissing the delivery update.', 'error');
+    }
+  };
+
   const markComplete = (id: string) => {
     setPrintQueue(prev => prev.map(q => q.id === id ? { ...q, status: 'completed' } : q));
     showToast(`Order ${id} marked as completed`, 'success');
@@ -1855,7 +1893,38 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                       <td className="text-sm text-muted">{o.phone}</td>
                       <td className="text-sm">{o.product}</td>
                       <td>{dpiStatusBadge(o.dpiStatus, o.dpi)}</td>
-                      <td>{workflowStatusBadge(o.workflowStatus, o.uploadStatus)}</td>
+                      <td>
+                        {workflowStatusBadge(o.workflowStatus, o.uploadStatus)}
+                        {o.pendingDeliveryUpdate && (
+                          <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <span
+                              className="badge badge-warning"
+                              style={{ fontSize: 10, display: 'inline-flex', alignItems: 'center', gap: 4, width: 'fit-content' }}
+                              title={`Shopify fulfillment status: ${o.pendingDeliveryUpdate.shopifyFulfillmentStatus || 'unknown'}${o.pendingDeliveryUpdate.trackingNumber ? ' · Tracking: ' + o.pendingDeliveryUpdate.trackingNumber : ''}`}
+                            >
+                              <i className="bi bi-truck" /> Shopify: {o.pendingDeliveryUpdate.status === 'delivered' ? 'Delivered' : 'Shipped'}?
+                            </span>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              <button
+                                className="btn btn-primary btn-sm"
+                                style={{ fontSize: 10, padding: '2px 8px' }}
+                                onClick={() => confirmDeliveryUpdate(o)}
+                                title="Apply this to the customer's tracking status"
+                              >
+                                <i className="bi bi-check-lg" /> Confirm
+                              </button>
+                              <button
+                                className="btn btn-outline btn-sm"
+                                style={{ fontSize: 10, padding: '2px 8px' }}
+                                onClick={() => dismissDeliveryUpdate(o)}
+                                title="Ignore - Shopify's data looks wrong"
+                              >
+                                Dismiss
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </td>
                       <td className="text-sm text-muted">
                         {(o.uploadedAt || o.designLockedAt || o.updatedAt || o.createdAt) ? new Date((o.uploadedAt || o.designLockedAt || o.updatedAt || o.createdAt) as string).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : (o.date || '-')}
                       </td>

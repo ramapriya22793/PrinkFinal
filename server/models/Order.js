@@ -87,7 +87,15 @@ const orderSchema = new mongoose.Schema({
   pdfUrl: { type: String },
   trackingNumber: { type: String },
   trackingUrl: { type: String },
-  trackingCompany: { type: String }
+  trackingCompany: { type: String },
+  // A Shopify fulfillment webhook detected a shipped/delivered signal that
+  // hasn't been confirmed yet. Deliberately NOT applied to deliveryStatus /
+  // workflowStatus automatically - an admin reviews and confirms it (or
+  // dismisses it if Shopify's data was wrong) via
+  // POST /:id/confirm-delivery-update. null once there's nothing pending.
+  // Shape: { status: 'shipped'|'delivered', trackingNumber, trackingUrl,
+  //          trackingCompany, shopifyFulfillmentStatus, detectedAt }
+  pendingDeliveryUpdate: { type: mongoose.Schema.Types.Mixed, default: null }
 }, { timestamps: true });
 
 // Indexes for the queries this app actually runs.
