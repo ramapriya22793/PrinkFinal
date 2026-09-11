@@ -932,7 +932,11 @@ select.input { cursor: pointer; }
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  /* overflow-x: auto so wide tables (many columns + long address/email text)
+     can be scrolled into view instead of silently clipped - overflow-y stays
+     hidden so the border-radius still clips the table's square corners. */
+  overflow-x: auto;
+  overflow-y: hidden;
   box-shadow: var(--shadow-sm);
 }
 .clean-table {

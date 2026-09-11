@@ -48,8 +48,19 @@ interface AdminPortalProps {
 function dpiStatusBadge(status: string, label: string) {
   if (status === 'ok')   return <span className="badge badge-success">{label}</span>;
   if (status === 'low')  return <span className="badge badge-warning">{label}</span>;
-  return                         <span className="badge badge-error">{label}</span>;
+  if (status === 'not_checked' || !status) {
+    return <span className="badge badge-secondary" title="No print file generated yet - DPI is only known once one exists">Not Checked</span>;
+  }
+  return <span className="badge badge-error">{label}</span>;
 }
+
+// Orders don't carry a top-level `phone` field - it lives on the nested
+// Shopify customer object. Fall back to the top-level field too, in case
+// some order-creation path ever sets it directly.
+export const getCustomerPhone = (o: any): string => {
+  if (!o) return '';
+  return o.phone || (o.customer && typeof o.customer === 'object' ? o.customer.phone : '') || '';
+};
 
 export const hasCustomizationBeenReceived = (o: any): boolean => {
   if (!o) return false;
@@ -77,22 +88,25 @@ function workflowStatusBadge(ws: string | undefined | null, fallbackUploadStatus
     // Fall back to legacy upload status if no workflow status set
     return uploadStatusBadge(fallbackUploadStatus || 'pending');
   }
-  const meta: Record<string, { cls: string; label: string }> = {
-    order_received:          { cls: 'badge-info',    label: '🛒 Order Received' },
-    personalization_pending: { cls: 'badge-warning', label: '📷 Personalization Pending' },
-    photo_uploaded:          { cls: 'badge-info',    label: '📷 Personalization Submitted' },
-    approved:                { cls: 'badge-success', label: '✅ Approved' },
-    rejected:                { cls: 'badge-error',   label: '❌ Rejected' },
-    sent_to_printer:         { cls: 'badge-primary', label: '🖨️ Printing' },
-    printer_processing:      { cls: 'badge-warning', label: '⚙️ Printing' },
-    printing:                { cls: 'badge-warning', label: '🖨️ Printing' },
-    ready_for_dispatch:      { cls: 'badge-accent',  label: '📦 Ready for Dispatch' },
-    in_transit:              { cls: 'badge-accent',  label: '🚚 In Transit' },
-    delivered:               { cls: 'badge-success', label: '🎉 Delivered' },
-    completed:               { cls: 'badge-success', label: '🎉 Delivered' },
+  // Labels are kept short so the Upload Status column doesn't force the
+  // Orders table wider than the screen - the full phrase is still available
+  // as a tooltip.
+  const meta: Record<string, { cls: string; label: string; full: string }> = {
+    order_received:          { cls: 'badge-info',    label: '🛒 Received',   full: 'Order Received' },
+    personalization_pending: { cls: 'badge-warning', label: '📷 Pending',    full: 'Personalization Pending' },
+    photo_uploaded:          { cls: 'badge-info',    label: '📷 Submitted',  full: 'Personalization Submitted' },
+    approved:                { cls: 'badge-success', label: '✅ Approved',   full: 'Approved' },
+    rejected:                { cls: 'badge-error',   label: '❌ Rejected',   full: 'Rejected' },
+    sent_to_printer:         { cls: 'badge-primary', label: '🖨️ Printing',  full: 'Printing' },
+    printer_processing:      { cls: 'badge-warning', label: '⚙️ Printing',  full: 'Printing' },
+    printing:                { cls: 'badge-warning', label: '🖨️ Printing',  full: 'Printing' },
+    ready_for_dispatch:      { cls: 'badge-accent',  label: '📦 Ready',     full: 'Ready for Dispatch' },
+    in_transit:              { cls: 'badge-accent',  label: '🚚 In Transit',full: 'In Transit' },
+    delivered:               { cls: 'badge-success', label: '🎉 Delivered', full: 'Delivered' },
+    completed:               { cls: 'badge-success', label: '🎉 Delivered', full: 'Delivered' },
   };
   const m = meta[ws];
-  return m ? <span className={`badge ${m.cls}`}>{m.label}</span> : <span className="badge badge-primary">{ws}</span>;
+  return m ? <span className={`badge ${m.cls}`} title={m.full}>{m.label}</span> : <span className="badge badge-primary">{ws}</span>;
 }
 
 
@@ -1123,31 +1137,37 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                 <div className="avatar" style={{ width: 28, height: 28, fontSize: '0.7rem', flexShrink: 0, backgroundColor: isRed ? '#ef4444' : undefined }}>
                   {nameStr[0] || 'G'}
                 </div>
-                {nameStr} {isRed && <span style={{ fontSize: '0.65rem', color: '#ef4444', fontWeight: 600, border: '1px solid #ef4444', padding: '1px 4px', borderRadius: '4px' }}>RED SIDE</span>}
+                <span style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={nameStr}>{nameStr}</span> {isRed && <span style={{ fontSize: '0.65rem', color: '#ef4444', fontWeight: 600, border: '1px solid #ef4444', padding: '1px 4px', borderRadius: '4px' }}>RED SIDE</span>}
               </>
             );
           })()}
         </div>
-        <div style={{ fontSize: '0.75rem', color: '#6b7280', paddingLeft: '2.25rem', marginTop: '0.1rem' }}>
+        <div
+          style={{ fontSize: '0.75rem', color: '#6b7280', paddingLeft: '2.25rem', marginTop: '0.1rem', maxWidth: 190, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          title={o.customerEmail || (o.customer && typeof o.customer === 'object' ? (o.customer as any).email : '') || o.email || 'N/A'}
+        >
           {o.customerEmail || (o.customer && typeof o.customer === 'object' ? (o.customer as any).email : '') || o.email || 'N/A'}
         </div>
-        {(o.shippingAddress || o.deliveryTemplate) && (
-          <div style={{ fontSize: '0.7rem', color: '#4b5563', paddingLeft: '2.25rem', marginTop: '0.15rem', display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
-            <i className="bi bi-geo-alt-fill" style={{ color: '#ec4899' }} />
-            <span>
-              {o.shippingAddress
-                ? (typeof o.shippingAddress === 'object'
-                  ? `${(o.shippingAddress as any).address1 || ''}, ${(o.shippingAddress as any).city || ''} ${(o.shippingAddress as any).zip || ''}`
-                  : String(o.shippingAddress))
-                : 'Standard Delivery'}
-            </span>
-            {(o.deliveryTemplate || o.shippingMethod || o.courierName) && (
-              <span className="badge badge-info" style={{ fontSize: '0.65rem', padding: '1px 5px' }}>
-                🚚 {o.deliveryTemplate || o.shippingMethod || o.courierName}
+        {(o.shippingAddress || o.deliveryTemplate) && (() => {
+          const addressText = o.shippingAddress
+            ? (typeof o.shippingAddress === 'object'
+              ? `${(o.shippingAddress as any).address1 || ''}, ${(o.shippingAddress as any).city || ''} ${(o.shippingAddress as any).zip || ''}`
+              : String(o.shippingAddress))
+            : 'Standard Delivery';
+          return (
+            <div style={{ fontSize: '0.7rem', color: '#4b5563', paddingLeft: '2.25rem', marginTop: '0.15rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }} title={addressText}>
+              <i className="bi bi-geo-alt-fill" style={{ color: '#ec4899', flexShrink: 0 }} />
+              <span style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {addressText}
               </span>
-            )}
-          </div>
-        )}
+              {(o.deliveryTemplate || o.shippingMethod || o.courierName) && (
+                <span className="badge badge-info" style={{ fontSize: '0.65rem', padding: '1px 5px', flexShrink: 0 }}>
+                  🚚 {o.deliveryTemplate || o.shippingMethod || o.courierName}
+                </span>
+              )}
+            </div>
+          );
+        })()}
 
         {o.images && o.images.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '0.25rem', paddingLeft: '2.25rem' }}>
@@ -1852,14 +1872,22 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                   ) : paginatedOrders.map(o => (
                     <tr key={o.id}>
                       <td>
-                        <a 
-                          href="#" 
+                        <a
+                          href="#"
                           onClick={(e) => { e.preventDefault(); setEditingOrder(o); }}
                           style={{ fontWeight: 700, color: '#4f46e5', textDecoration: 'underline' }}
-                          title="Click to open design editor"
+                          title={`Click to open design editor · Full ID: ${o.id}`}
                         >
-                          {o.id}
+                          #{o.orderNumber || o.id}
                         </a>
+                        {o.orderNumber && o.id !== o.orderNumber && (
+                          <div
+                            style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2, maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                            title={o.id}
+                          >
+                            {o.id}
+                          </div>
+                        )}
                       </td>
                       <td>
 
@@ -1890,8 +1918,12 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                         )}
 
                       </td>
-                      <td className="text-sm text-muted">{o.phone}</td>
-                      <td className="text-sm">{o.product}</td>
+                      <td className="text-sm text-muted">{getCustomerPhone(o) || '-'}</td>
+                      <td className="text-sm" style={{ maxWidth: 160 }}>
+                        <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={o.product}>
+                          {o.product}
+                        </span>
+                      </td>
                       <td>{dpiStatusBadge(o.dpiStatus, o.dpi)}</td>
                       <td>
                         {workflowStatusBadge(o.workflowStatus, o.uploadStatus)}
@@ -1933,16 +1965,16 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                           <button
                             className="btn btn-outline btn-sm"
                             onClick={() => setEditingOrder(o)}
-                            title="Open design editor for this order"
+                            title="Edit Design"
                           >
-                            <i className="bi bi-palette" /> Edit Design
+                            <i className="bi bi-palette" />
                           </button>
                           <button
                             className="btn btn-outline btn-sm"
                             onClick={() => document.getElementById(`admin-upload-input-${o.id}`)?.click()}
                             title="Upload photos directly to this order"
                           >
-                            <i className="bi bi-upload" /> Upload
+                            <i className="bi bi-upload" />
                           </button>
                           <input
                             type="file"
@@ -1975,7 +2007,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                             title="Download all customer uploads"
                             style={{ opacity: (!o.images || o.images.length === 0) ? 0.5 : 1 }}
                           >
-                            <i className="bi bi-download" /> Download
+                            <i className="bi bi-download" />
                           </button>
 
                           {/* Review button: show when photos uploaded and not yet approved */}
@@ -1984,8 +2016,9 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                               className="btn btn-primary btn-sm"
                               style={{ background: 'var(--accent)', borderColor: 'var(--accent)' }}
                               onClick={() => setReviewingOrder(o)}
+                              title="Review Photos"
                             >
-                              <i className="bi bi-shield-check" /> Review Photos
+                              <i className="bi bi-shield-check" />
                             </button>
                           )}
                           {/* Re-review button for rejected orders */}
@@ -1994,8 +2027,9 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                               className="btn btn-primary btn-sm"
                               style={{ background: '#dc2626', borderColor: '#dc2626' }}
                               onClick={() => setReviewingOrder(o)}
+                              title="Re-Review"
                             >
-                              <i className="bi bi-arrow-repeat" /> Re-Review
+                              <i className="bi bi-arrow-repeat" />
                             </button>
                           )}
                           {/* Route to printer: show when approved */}
@@ -2004,16 +2038,17 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                               id={`route-${o.id}`}
                               className="btn btn-primary btn-sm"
                               onClick={() => routeToPrinter(o)}
+                              title="Send to Printer"
                             >
-                              <i className="bi bi-printer" /> Send to Printer
+                              <i className="bi bi-printer" />
                             </button>
                           ) : (o.workflowStatus === 'sent_to_printer' || o.workflowStatus === 'printer_processing') ? (
-                            <span className="badge badge-primary" style={{ fontSize: 11 }}>
-                              <i className="bi bi-printer" /> {o.workflowStatus === 'sent_to_printer' ? 'At Printer' : 'Printing...'}
+                            <span className="badge badge-primary" style={{ fontSize: 11 }} title={o.workflowStatus === 'sent_to_printer' ? 'At Printer' : 'Printing'}>
+                              <i className="bi bi-printer" />
                             </span>
                           ) : o.workflowStatus === 'completed' ? (
-                            <span className="badge badge-success" style={{ fontSize: 11 }}>
-                              <i className="bi bi-check" /> Completed
+                            <span className="badge badge-success" style={{ fontSize: 11 }} title="Completed">
+                              <i className="bi bi-check" />
                             </span>
                           ) : (
                             <>
@@ -2023,7 +2058,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                                 onClick={() => sendWhatsApp(o.id, typeof o.customer === 'object' ? (o.customer as any)?.name : o.customer)}
                                 title="Send WhatsApp reminder"
                               >
-                                <i className="bi bi-whatsapp" /> Alert
+                                <i className="bi bi-whatsapp" />
                               </button>
                               {o.dpiStatus === 'low' && (
                                 <button
@@ -2031,8 +2066,9 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                                   className="btn btn-sm"
                                   style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fbbf24' }}
                                   onClick={() => forceApprove(o.id)}
+                                  title="Force Approve"
                                 >
-                                  <i className="bi bi-check2-circle" /> Force Approve
+                                  <i className="bi bi-check2-circle" />
                                 </button>
                               )}
                             </>
@@ -2107,9 +2143,9 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
             {/* Stats row — computed from real live customization tracker */}
             <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
               {[
-                { label: 'Total Orders', value: `${orders.length} orders`, icon: 'bi-box-seam', cls: '' },
-                { label: 'Ready (Customization Received)', value: `${orders.filter(hasCustomizationBeenReceived).length} orders`, icon: 'bi-check-circle-fill', cls: ' success' },
-                { label: 'Pending (Customization Needed)', value: `${orders.filter(o => !hasCustomizationBeenReceived(o)).length} orders`, icon: 'bi-hourglass-split', cls: ' accent' },
+                { label: 'Total Orders', value: `${orderStats.total || orders.length} orders`, icon: 'bi-box-seam', cls: '' },
+                { label: 'Ready (Customization Received)', value: `${tabCounts.ready || 0} orders`, icon: 'bi-check-circle-fill', cls: ' success' },
+                { label: 'Pending (Customization Needed)', value: `${tabCounts.pending || 0} orders`, icon: 'bi-hourglass-split', cls: ' accent' },
               ].map(s => (
                 <div key={s.label} className={`metric-card${s.cls}`} style={{ flex: '1 1 160px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -2166,7 +2202,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                     <div style={{ flex: 1, minWidth: 160 }}>
                       <div style={{ fontWeight: 600, color: 'var(--primary)', marginBottom: 2 }}>Order #{o.orderNumber || o.id}</div>
                       <div className="text-sm text-muted">{o.product}</div>
-                      <div className="text-xs text-muted">{o.phone}</div>
+                      <div className="text-xs text-muted">{getCustomerPhone(o) || '-'}</div>
                       {o.images && o.images.length > 0 && (
                         <div style={{ marginTop: '0.25rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                           <a 

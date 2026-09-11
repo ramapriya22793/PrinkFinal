@@ -123,6 +123,30 @@ function derivePrintGenerationStatus(printFiles = [], failures = []) {
   return 'completed';
 }
 
+/**
+ * Aggregate DPI info across a print job's per-image render results.
+ *
+ * The Order schema has no top-level dpi/dpiStatus field - the real numbers
+ * only ever exist per print-file, set once printRenderer.js runs (see
+ * generatePrintPdf's `effectiveDpi`/`belowMinimumDpi` return values, which
+ * order.routes.js copies onto `order.printFiles[]`). An order that hasn't
+ * reached print-file generation yet has nothing to report, so admins see
+ * "Not Checked" rather than a misleading/blank status.
+ */
+function deriveDpiStatus(order = {}) {
+  const files = Array.isArray(order.printFiles) ? order.printFiles : [];
+  const withDpi = files.filter(f => f && typeof f.effectiveDpi === 'number');
+  if (withDpi.length === 0) return { dpiStatus: 'not_checked', dpi: '' };
+
+  // The lowest DPI among an order's images is the one that actually matters -
+  // that's the image that would print blurry.
+  const worst = withDpi.reduce((min, f) => (f.effectiveDpi < min.effectiveDpi ? f : min));
+  return {
+    dpiStatus: worst.belowMinimumDpi ? 'low' : 'ok',
+    dpi: `${Math.round(worst.effectiveDpi)} DPI`
+  };
+}
+
 module.exports = {
   DASH_STAGES,
   deriveDashStatus,
@@ -130,4 +154,5 @@ module.exports = {
   hasPrintFile,
   reconcileWorkflowStatus,
   derivePrintGenerationStatus,
+  deriveDpiStatus,
 };

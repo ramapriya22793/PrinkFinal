@@ -8,7 +8,7 @@ const { generatePrintPdf, UPLOADS_DIR } = require('../utils/printRenderer');
 const { generateButterflyBoxPdf } = require('../utils/butterflyGenerator');
 const { allocateButterflyTemplate } = require('../services/butterflyAllocation.service');
 const { generateMagazinePdf } = require('../utils/magazineGenerator');
-const { reconcileWorkflowStatus, derivePrintGenerationStatus } = require('../utils/orderStatus');
+const { reconcileWorkflowStatus, derivePrintGenerationStatus, deriveDpiStatus } = require('../utils/orderStatus');
 const multer = require('multer');
 const sharp = require('sharp');
 const crypto = require('crypto');
@@ -111,8 +111,13 @@ router.get('/', adminMiddleware, async (req, res) => {
 
     console.log('[ORDERS] Result: active orders returned:', orders.length, '| total active:', total, '| pending:', pending, '| ready:', ready);
 
+    // Orders have no top-level dpi/dpiStatus field - derive it at read time
+    // from printFiles[] (see deriveDpiStatus) so the admin UI shows a real
+    // status/"Not Checked" instead of a permanently blank badge.
+    const ordersWithDpi = orders.map(o => ({ ...o, ...deriveDpiStatus(o) }));
+
     return res.json({
-      orders,
+      orders: ordersWithDpi,
       pagination: { total, page, limit, pages: Math.ceil(total / limit) },
       stats: { total, pending, ready, revision },
       tabCounts: {
