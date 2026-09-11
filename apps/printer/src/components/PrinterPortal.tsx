@@ -48,8 +48,8 @@ export default function PrinterPortal({ extraItems = [] }: PrinterPortalProps) {
   const [expandedOrder, setExpandedOrder] = useState<any | null>(null);
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
   const [batchDownloading, setBatchDownloading] = useState(false);
-  // null = not checked yet / no file to check, true = file loads, false = 404/error
-  const [previewFileOk, setPreviewFileOk] = useState<boolean | null>(null);
+  // url -> true (loads) | false (404/error). Absent = not checked yet.
+  const [fileAvailability, setFileAvailability] = useState<Record<string, boolean>>({});
 
   const emailRef = useRef<HTMLInputElement>(null);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
@@ -75,17 +75,28 @@ export default function PrinterPortal({ extraItems = [] }: PrinterPortalProps) {
   // A stored pdfUrl can 404 (e.g. the file was never persisted to S3 and was
   // lost on restart - see V2 feedback "final PDF cannot be located"). An
   // <iframe> doesn't surface that as an error, it just renders the server's
-  // "Cannot GET ..." text, so check explicitly and show a clear message
-  // instead of silently displaying that.
+  // "Cannot GET ..." text, and a plain <a href> just opens the same broken
+  // page in a new tab - so every print-file URL for the expanded job (there
+  // can be more than one, e.g. multi-photo canvas orders) is HEAD-checked up
+  // front and looked up in `fileAvailability` before it's offered as a link.
   useEffect(() => {
-    if (!previewUrl) { setPreviewFileOk(null); return; }
+    const urls: string[] = (expandedOrder?.printFiles || [])
+      .map((f: any) => f?.url)
+      .filter(Boolean);
+    if (previewUrl) urls.push(previewUrl);
+    const toCheck = [...new Set(urls)].filter(u => !(u in fileAvailability));
+    if (toCheck.length === 0) return;
     let cancelled = false;
-    setPreviewFileOk(null);
-    fetch(previewUrl, { method: 'HEAD' })
-      .then(res => { if (!cancelled) setPreviewFileOk(res.ok); })
-      .catch(() => { if (!cancelled) setPreviewFileOk(false); });
+    toCheck.forEach(url => {
+      fetch(url, { method: 'HEAD' })
+        .then(res => { if (!cancelled) setFileAvailability(prev => ({ ...prev, [url]: res.ok })); })
+        .catch(() => { if (!cancelled) setFileAvailability(prev => ({ ...prev, [url]: false })); });
+    });
     return () => { cancelled = true; };
-  }, [previewUrl]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedOrder, previewUrl]);
+
+  const previewFileOk = previewUrl ? (fileAvailability[previewUrl] ?? null) : null;
 
   const isFetchingQueue = useRef(false);
 
@@ -780,11 +791,19 @@ export default function PrinterPortal({ extraItems = [] }: PrinterPortalProps) {
                     {item.printFiles && item.printFiles.length > 0 && (
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         {item.printFiles.map((file, idx) => (
-                          <a key={idx} href={file.url} target="_blank" rel="noopener noreferrer"
-                            className="btn btn-outline btn-sm" style={{ flex: 1, justifyContent: 'center', gap: 4 }}>
-                            <i className="bi bi-printer" style={{ color: '#e11d48' }} />
-                            Sheet {idx + 1}
-                          </a>
+                          fileAvailability[file.url] === false ? (
+                            <span key={idx} title="Ask an admin to regenerate this print file"
+                              className="btn btn-outline btn-sm" style={{ flex: 1, justifyContent: 'center', gap: 4, opacity: 0.5, cursor: 'not-allowed' }}>
+                              <i className="bi bi-exclamation-triangle" />
+                              Sheet {idx + 1} unavailable
+                            </span>
+                          ) : (
+                            <a key={idx} href={file.url} target="_blank" rel="noopener noreferrer"
+                              className="btn btn-outline btn-sm" style={{ flex: 1, justifyContent: 'center', gap: 4 }}>
+                              <i className="bi bi-printer" style={{ color: '#e11d48' }} />
+                              Sheet {idx + 1}
+                            </a>
+                          )
                         ))}
                       </div>
                     )}
@@ -919,18 +938,31 @@ export default function PrinterPortal({ extraItems = [] }: PrinterPortalProps) {
                               {item.printFiles && item.printFiles.length > 0 ? (
                                 <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
                                   {item.printFiles.map((file, idx) => (
-                                    <a 
-                                      key={idx} 
-                                      href={file.url} 
-                                      target="_blank" 
-                                      rel="noopener noreferrer" 
-                                      className="btn btn-outline btn-sm"
-                                      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 16px', height: 'auto', gap: '4px' }}
-                                    >
-                                      <i className="bi bi-printer" style={{ fontSize: '24px', color: '#e11d48' }} />
-                                      <span>Print Sheet {idx + 1}</span>
-                                      <span style={{ fontSize: '10px', color: '#64748b' }}>{file.widthMm}x{file.heightMm}mm</span>
-                                    </a>
+                                    fileAvailability[file.url] === false ? (
+                                      <span
+                                        key={idx}
+                                        title="Ask an admin to regenerate this print file"
+                                        className="btn btn-outline btn-sm"
+                                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 16px', height: 'auto', gap: '4px', opacity: 0.5, cursor: 'not-allowed' }}
+                                      >
+                                        <i className="bi bi-exclamation-triangle" style={{ fontSize: '24px', color: 'var(--error, #dc2626)' }} />
+                                        <span>Sheet {idx + 1} unavailable</span>
+                                        <span style={{ fontSize: '10px', color: '#64748b' }}>File not found</span>
+                                      </span>
+                                    ) : (
+                                      <a
+                                        key={idx}
+                                        href={file.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="btn btn-outline btn-sm"
+                                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 16px', height: 'auto', gap: '4px' }}
+                                      >
+                                        <i className="bi bi-printer" style={{ fontSize: '24px', color: '#e11d48' }} />
+                                        <span>Print Sheet {idx + 1}</span>
+                                        <span style={{ fontSize: '10px', color: '#64748b' }}>{file.widthMm}x{file.heightMm}mm</span>
+                                      </a>
+                                    )
                                   ))}
                                 </div>
                               ) : (
