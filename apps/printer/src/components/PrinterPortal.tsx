@@ -48,6 +48,8 @@ export default function PrinterPortal({ extraItems = [] }: PrinterPortalProps) {
   const [expandedOrder, setExpandedOrder] = useState<any | null>(null);
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
   const [batchDownloading, setBatchDownloading] = useState(false);
+  // null = not checked yet / no file to check, true = file loads, false = 404/error
+  const [previewFileOk, setPreviewFileOk] = useState<boolean | null>(null);
 
   const emailRef = useRef<HTMLInputElement>(null);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
@@ -62,6 +64,28 @@ export default function PrinterPortal({ extraItems = [] }: PrinterPortalProps) {
   useEffect(() => {
     if (screen === 'login') emailRef.current?.focus();
   }, [screen]);
+
+  // The job the Registration Mark Preview panel should show: whichever row
+  // the operator has expanded, falling back to the first queue item so the
+  // panel isn't empty on load. Previously this was hardwired to queue[0]
+  // regardless of what the operator was looking at.
+  const previewOrder = expandedOrder || queue[0];
+  const previewUrl = previewOrder?.printFiles?.[0]?.url;
+
+  // A stored pdfUrl can 404 (e.g. the file was never persisted to S3 and was
+  // lost on restart - see V2 feedback "final PDF cannot be located"). An
+  // <iframe> doesn't surface that as an error, it just renders the server's
+  // "Cannot GET ..." text, so check explicitly and show a clear message
+  // instead of silently displaying that.
+  useEffect(() => {
+    if (!previewUrl) { setPreviewFileOk(null); return; }
+    let cancelled = false;
+    setPreviewFileOk(null);
+    fetch(previewUrl, { method: 'HEAD' })
+      .then(res => { if (!cancelled) setPreviewFileOk(res.ok); })
+      .catch(() => { if (!cancelled) setPreviewFileOk(false); });
+    return () => { cancelled = true; };
+  }, [previewUrl]);
 
   const isFetchingQueue = useRef(false);
 
@@ -152,6 +176,15 @@ export default function PrinterPortal({ extraItems = [] }: PrinterPortalProps) {
       if (res.ok) {
         const data = await res.json();
         setExpandedOrder(data.order);
+      } else if (res.status === 403) {
+        // Expected for a Pending job - the customer/admin side isn't done
+        // yet. Show that inline instead of an error toast.
+        const data = await res.json().catch(() => ({} as any));
+        setExpandedOrder({
+          id,
+          notApproved: true,
+          message: data.error || 'This order has not been approved for printing yet.'
+        });
       } else {
         showToast('Failed to fetch order details.', 'error');
       }
@@ -726,7 +759,12 @@ export default function PrinterPortal({ extraItems = [] }: PrinterPortalProps) {
                 {expandedId === item.id && (
                   <div style={{ padding: '14px 16px 16px', borderTop: '1px solid #e2e8f0', background: '#fff' }}>
                     <div style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
-                      {expandedOrder ? (
+                      {expandedOrder?.notApproved ? (
+                        <div style={{ color: '#b45309', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <i className="bi bi-hourglass-split" />
+                          {expandedOrder.message}
+                        </div>
+                      ) : expandedOrder ? (
                         <>
                           <div><span style={{ color: '#94a3b8', fontWeight: 600 }}>Customer: </span>{customerName(expandedOrder.customer)}</div>
                           <div><span style={{ color: '#94a3b8', fontWeight: 600 }}>Email: </span>{expandedOrder.customer?.email || 'N/A'}</div>
@@ -857,7 +895,12 @@ export default function PrinterPortal({ extraItems = [] }: PrinterPortalProps) {
                           <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
                             <div style={{ flex: '1 1 300px' }}>
                               <h5 style={{ fontWeight: 600, marginBottom: '12px', fontSize: '14px', color: 'var(--primary)' }}>Order & Customer Details</h5>
-                              {expandedOrder ? (
+                              {expandedOrder?.notApproved ? (
+                                <div style={{ fontSize: '13px', color: '#b45309', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <i className="bi bi-hourglass-split" />
+                                  {expandedOrder.message}
+                                </div>
+                              ) : expandedOrder ? (
                                 <div style={{ fontSize: '13px', lineHeight: '1.6' }}>
                                   <p><strong>Customer:</strong> {customerName(expandedOrder.customer)}</p>
                                   <p><strong>Email:</strong> {expandedOrder.customer?.email || 'N/A'}</p>
@@ -940,7 +983,9 @@ export default function PrinterPortal({ extraItems = [] }: PrinterPortalProps) {
               <h4 style={{ fontSize: 13, fontWeight: 700, color: 'var(--primary)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                 Registration Mark Preview
               </h4>
-              <p className="text-xs text-muted" style={{ marginTop: 2 }}>Alignment reference for press operators</p>
+              <p className="text-xs text-muted" style={{ marginTop: 2 }}>
+                {previewOrder ? `Order #${previewOrder.orderNumber ?? previewOrder.id}` : 'Select a job to preview'}
+              </p>
             </div>
             <span className="badge badge-primary"><i className="bi bi-printer" /> Print Calibration</span>
           </div>
@@ -970,18 +1015,25 @@ export default function PrinterPortal({ extraItems = [] }: PrinterPortalProps) {
               </div>
               {/* Job metadata */}
               <span style={{ position: 'absolute', bottom: 5, left: 8, fontFamily: 'monospace', fontSize: 8, color: '#64748b', letterSpacing: '0.04em' }}>
-                JOB: {queue[0]?.id ?? '#----'} · the PRINK PRINT ENGINE · v2.1 · RGB/300DPI
+                JOB: {previewOrder?.id ?? '#----'} · the PRINK PRINT ENGINE · v2.1 · RGB/300DPI
               </span>
               {/* Image fill */}
               <div style={{ width: '100%', height: '100%', background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 1, borderRadius: 1, overflow: 'hidden' }}>
-                {queue[0]?.printFiles?.[0]?.url ? (
-                  <iframe 
-                    src={`${queue[0].printFiles[0].url}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`}
-                    style={{ width: '100%', height: '100%', border: 'none' }} 
+                {!previewUrl ? (
+                  <i className="bi bi-card-image" style={{ fontSize: '40px', color: '#94a3b8' }} />
+                ) : previewFileOk === false ? (
+                  <div style={{ textAlign: 'center', padding: '0 16px' }}>
+                    <i className="bi bi-exclamation-triangle" style={{ fontSize: '28px', color: 'var(--error, #dc2626)' }} />
+                    <p style={{ fontSize: 11, color: '#64748b', marginTop: 6 }}>
+                      Print file not found. Ask an admin to regenerate it.
+                    </p>
+                  </div>
+                ) : (
+                  <iframe
+                    src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`}
+                    style={{ width: '100%', height: '100%', border: 'none' }}
                     title="PDF Preview"
                   />
-                ) : (
-                  <i className="bi bi-card-image" style={{ fontSize: '40px', color: '#94a3b8' }} />
                 )}
               </div>
             </div>
