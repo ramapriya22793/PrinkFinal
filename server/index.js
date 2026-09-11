@@ -71,10 +71,18 @@ app.use(cors({
     try {
       const url = new URL(origin);
       if (
-        url.hostname === 'theprink.in' || 
-        url.hostname.endsWith('.theprink.in') || 
+        url.hostname === 'theprink.in' ||
+        url.hostname.endsWith('.theprink.in') ||
         url.hostname.endsWith('.vercel.app')
       ) {
+        return cb(null, true);
+      }
+      // Any localhost/127.0.0.1 port, not just the hardcoded 3000-3003 above -
+      // apps/*/vite.config.ts's dev ports are bumped locally per-machine to
+      // dodge collisions with sibling projects' dev servers (never committed,
+      // so this list can't just be updated to match), so a fixed port list
+      // here silently breaks local login/API calls whenever that happens.
+      if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
         return cb(null, true);
       }
     } catch (e) {}
