@@ -38,6 +38,13 @@ async function generateButterflyBoxPdf({ orderId, images, order, orderId2, image
 
   const getImgKey = (img) => img.id || img.url || img.serverFilename || JSON.stringify(img);
 
+  // Every original image this call couldn't resolve (local disk, S3, and
+  // GridFS all missed) gets a grey placeholder so the layout still renders -
+  // but the caller MUST know this happened. A placeholder-filled PDF is not
+  // a real print file, and reporting printGenerationStatus:'completed' for
+  // one silently ships an order with blank photos. See missingImageCount.
+  let missingImageCount = 0;
+
   // Helper to process a set of padded images by only rendering unique ones
   const processImagesList = async (imgs) => {
     const uniqueMap = new Map();
@@ -56,6 +63,7 @@ async function generateButterflyBoxPdf({ orderId, images, order, orderId2, image
 
       if (!src) {
         console.warn(`[WARNING] Could not find original file for image ${img.id || 'unknown'}. Using placeholder.`);
+        missingImageCount++;
         return await require('sharp')({
           create: { width: 1000, height: 1000, channels: 4, background: { r: 230, g: 230, b: 230, alpha: 1 } }
         }).jpeg({ quality: 90 }).toBuffer();
@@ -376,7 +384,13 @@ async function generateButterflyBoxPdf({ orderId, images, order, orderId2, image
         belowMinimumDpi: false,
         colourSpace: 'RGB',
         templateId: 'butterfly-box',
-        generatedAt: new Date()
+        generatedAt: new Date(),
+        // How many of the customer's actual photos could NOT be resolved
+        // (local disk, S3 and GridFS all missed) and were rendered as grey
+        // placeholders instead. A generated file with missingImages > 0 is
+        // not a real print file - callers must not treat it as 'completed'.
+        missingImages: missingImageCount,
+        totalImages: images.length + (images2?.length || 0)
       });
     });
 

@@ -33,10 +33,19 @@ function isApprovedForPrint(order = {}) {
   return APPROVED_OR_LATER_WORKFLOW.includes(order.workflowStatus);
 }
 
-/** True once a print-ready file has actually been generated for this order. */
+/**
+ * True once a genuine print-ready file exists for this order - one with no
+ * missing/placeholder photo slots (see derivePrintGenerationStatus above).
+ * `printGenerationStatus === 'completed'` is the authoritative signal;
+ * printFiles.length alone is not, since a file can exist with blank slots.
+ */
 function hasPrintFile(order = {}) {
-  if (Array.isArray(order.printFiles) && order.printFiles.some(Boolean)) return true;
-  return order.printGenerationStatus === 'completed';
+  if (order.printGenerationStatus === 'completed') return true;
+  if (order.printGenerationStatus === 'partial' || order.printGenerationStatus === 'failed') return false;
+  // No printGenerationStatus recorded (older data) - fall back to "a file
+  // with no known missing images exists".
+  return Array.isArray(order.printFiles)
+    && order.printFiles.some(f => f && !f.missingImages);
 }
 
 /**
@@ -95,10 +104,30 @@ function reconcileWorkflowStatus(order = {}) {
   return (WORKFLOW_RANK[target] ?? 0) > (WORKFLOW_RANK[current] ?? 0) ? target : current;
 }
 
+/**
+ * Decide the print-generation outcome from the files a render pass produced
+ * and any per-image failures it hit.
+ *
+ * The multi-image generators (butterflyGenerator, magazineGenerator) fall
+ * back to a grey placeholder for any customer photo they can't resolve
+ * (local disk / S3 / GridFS all missed) rather than throwing, so a "file"
+ * can exist with some or all of its photo slots blank. Each such file
+ * reports how many via `missingImages`. A file with missing images is not
+ * a real print-ready file - reporting 'completed' for one would silently
+ * ship an order with blank photos.
+ */
+function derivePrintGenerationStatus(printFiles = [], failures = []) {
+  if (printFiles.length === 0) return 'failed';
+  const totalMissing = printFiles.reduce((n, f) => n + (f?.missingImages || 0), 0);
+  if (failures.length > 0 || totalMissing > 0) return 'partial';
+  return 'completed';
+}
+
 module.exports = {
   DASH_STAGES,
   deriveDashStatus,
   isApprovedForPrint,
   hasPrintFile,
   reconcileWorkflowStatus,
+  derivePrintGenerationStatus,
 };

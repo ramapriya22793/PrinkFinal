@@ -32,12 +32,18 @@ async function generateMagazinePdf({ orderId, images, order }) {
     }
   }
 
+  // How many of the customer's actual photos could NOT be resolved (local
+  // disk, S3 and GridFS all missed) and were rendered as grey placeholders
+  // instead. Callers must not report 'completed' for a file with any.
+  let missingImageCount = 0;
+
   const uniqueBuffers = await Promise.all(uniqueList.map(async (img) => {
     // Always load the original high-resolution image to ensure professional print quality!
     const src = await resolveOriginalImageSource(img);
 
     if (!src) {
       console.warn(`[WARNING] Could not find original file for image ${img.id || 'unknown'}. Using placeholder.`);
+      missingImageCount++;
       return await require('sharp')({
         create: { width: 1600, height: 2600, channels: 4, background: { r: 230, g: 230, b: 230, alpha: 1 } }
       }).jpeg({ quality: 95 }).toBuffer();
@@ -158,7 +164,9 @@ async function generateMagazinePdf({ orderId, images, order }) {
         belowMinimumDpi: false,
         colourSpace: 'RGB',
         templateId: 'magazine',
-        generatedAt: new Date()
+        generatedAt: new Date(),
+        missingImages: missingImageCount,
+        totalImages: images.length
       });
     });
 

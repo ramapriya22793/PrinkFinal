@@ -8,7 +8,7 @@ const { generatePrintPdf, UPLOADS_DIR } = require('../utils/printRenderer');
 const { generateButterflyBoxPdf } = require('../utils/butterflyGenerator');
 const { allocateButterflyTemplate } = require('../services/butterflyAllocation.service');
 const { generateMagazinePdf } = require('../utils/magazineGenerator');
-const { reconcileWorkflowStatus } = require('../utils/orderStatus');
+const { reconcileWorkflowStatus, derivePrintGenerationStatus } = require('../utils/orderStatus');
 const multer = require('multer');
 const sharp = require('sharp');
 const crypto = require('crypto');
@@ -648,11 +648,16 @@ router.post('/:id/review', adminMiddleware, async (req, res) => {
 
     if (isApproved) {
       if (isCached) {
-        updates.printGenerationStatus = 'completed';
+        updates.printGenerationStatus = derivePrintGenerationStatus(existingOrder.printFiles);
         updates.pdfUrl = existingOrder.printFiles[0].url;
-        // Print file already exists - route straight to the printer queue.
-        updates.workflowStatus = 'sent_to_printer';
-        updates.printerAssignedAt = new Date();
+        if (updates.printGenerationStatus === 'completed') {
+          // Print file already exists and is complete - route straight to
+          // the printer queue.
+          updates.workflowStatus = 'sent_to_printer';
+          updates.printerAssignedAt = new Date();
+        }
+        // else: cached file has missing photo slots - stay at 'approved' so
+        // it doesn't reach the printer queue as if it were print-ready.
       } else {
         updates.designHash = currentHash;
         updates.printGenerationStatus = 'processing';
@@ -704,27 +709,33 @@ router.post('/:id/review', adminMiddleware, async (req, res) => {
         }
 
         const generated = printFiles.length > 0;
+        const genStatus = derivePrintGenerationStatus(printFiles);
         const genSet = {
           printFiles,
           pdfUrl: generated ? printFiles[0].url : null,
-          printGenerationStatus: generated ? 'completed' : 'failed'
+          printGenerationStatus: genStatus
         };
-        // A successful render is the last thing standing between an approved
-        // design and the printer queue, so route it there automatically -
-        // no separate manual "Route to Printer" click needed on the happy path.
-        if (generated && isApproved) {
+        // A successful, COMPLETE render is the last thing standing between an
+        // approved design and the printer queue, so route it there
+        // automatically - no separate manual "Route to Printer" click needed
+        // on the happy path. A file with missing photo slots ('partial')
+        // must not reach the printer queue looking print-ready.
+        if (genStatus === 'completed' && isApproved) {
           genSet.workflowStatus = 'sent_to_printer';
           genSet.printStatus = 'queued';
           genSet.printerAssignedAt = new Date();
         }
         await Order.updateOne({ id }, { $set: genSet });
 
+        const totalMissing = printFiles.reduce((n, f) => n + (f?.missingImages || 0), 0);
         await db.addActivityLog(
           id,
-          generated ? 'PDF_GENERATED' : 'PDF_FAILED',
-          generated
-            ? `Print file generated (${printFiles.length} of ${images.length})${genSet.workflowStatus === 'sent_to_printer' ? ' and routed to the print queue' : ''} in background.`
-            : 'Print file generation failed in background.'
+          generated ? (genStatus === 'completed' ? 'PDF_GENERATED' : 'PDF_PARTIAL') : 'PDF_FAILED',
+          genStatus === 'completed'
+            ? `Print file generated (${printFiles.length} of ${images.length}) and routed to the print queue in background.`
+            : generated
+              ? `Print file generated with ${totalMissing} missing photo(s) - held at 'approved', NOT routed to the printer.`
+              : 'Print file generation failed in background.'
         );
         return printFiles;
       } catch (bgErr) {
@@ -877,9 +888,10 @@ router.post('/:id/regenerate', adminMiddleware, async (req, res) => {
       printFiles,
       templateId: template.id,
       pdfUrl: printFiles[0].url,
-      printGenerationStatus: failures.length ? 'partial' : 'completed',
+      printGenerationStatus: derivePrintGenerationStatus(printFiles, failures),
       printGenerationErrors: failures
     };
+    updateData.workflowStatus = reconcileWorkflowStatus({ ...order, ...updateData });
 
     const updated = await db.updateOrder(id, updateData);
     await db.addActivityLog(id, 'PDF_REGENERATED',
@@ -993,7 +1005,7 @@ router.post('/:id/submit-design', adminMiddleware, async (req, res) => {
     const submitUpdates = {
       printFiles: printFiles.length ? printFiles : refreshed.printFiles,
       pdfUrl: printFiles.length ? printFiles[0].url : refreshed.pdfUrl,
-      printGenerationStatus: failures.length ? (printFiles.length ? 'partial' : 'failed') : 'completed',
+      printGenerationStatus: printFiles.length ? derivePrintGenerationStatus(printFiles, failures) : 'failed',
       printGenerationErrors: failures,
       printStatus: 'queued',
       orderStatus: 'Approved',
@@ -1085,7 +1097,7 @@ router.post('/:id/force-approve', adminMiddleware, async (req, res) => {
             templateId: result.templateId,
             templateSide: result.templateSide,
             linkedOrderId: result.linkedOrderId,
-            printGenerationStatus: result.generated ? 'completed' : 'pending'
+            printGenerationStatus: result.printGenerationStatus || 'pending'
           };
         } catch (err) {
           console.error('[FORCE APPROVE BUTTERFLY ALLOCATION ERROR]', id, err.message);
@@ -1118,6 +1130,9 @@ router.post('/:id/force-approve', adminMiddleware, async (req, res) => {
     const updateData = {
       designLockedAt: order.designLockedAt || new Date(),
       customizationStatus: 'completed',
+      // Default for the magazine/canvas branches, which don't set this
+      // themselves; the butterfly branch's extraUpdateData overrides it.
+      printGenerationStatus: derivePrintGenerationStatus(printFiles),
       ...extraUpdateData,
       uploadStatus: 'ready',
       adminApprovalStatus: 'approved',
