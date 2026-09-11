@@ -326,10 +326,13 @@ async function generatePrintPdf({ orderId, order, image, template, transform }) 
   const outputPath = path.join(PRINT_DIR, filename);
 
   return new Promise((resolve, reject) => {
-    // Page 1 is A4 for standard specification sheet, margins 36pt.
+    // Every page is full-bleed artwork at the template's real print size -
+    // no A4 "job specification" cover page. The printer only needs the
+    // artwork; see the identical change for Butterfly Box in
+    // butterflyGenerator.js.
     const doc = new PDFDocument({
-      size: 'A4',
-      margin: 36,
+      size: [pageW, pageH],
+      margin: 0,
       info: {
         Title: `THE PRINK print file ${orderId}`,
         Author: 'THE PRINK',
@@ -341,89 +344,12 @@ async function generatePrintPdf({ orderId, order, image, template, transform }) 
     const stream = fs.createWriteStream(outputPath);
     doc.pipe(stream);
 
-    // Render specification info on Page 1
-    const infoPageW = 595.28;
-    
-    doc.fillColor('#171C62');
-    doc.fontSize(20).font('Helvetica-Bold').text('THE PRINK - PRINT JOB SPECIFICATION', 36, 40);
-    doc.moveTo(36, 70).lineTo(infoPageW - 36, 70).lineWidth(2).strokeColor('#171C62').stroke();
-
-    // Reset stroke color
-    doc.strokeColor('#e2e8f0');
-
-    let currentY = 85;
-    const addRow = (label, value) => {
-      doc.fontSize(10).font('Helvetica-Bold').fillColor('#475569').text(label + ':', 45, currentY);
-      doc.fontSize(10).font('Helvetica').fillColor('#0f172a').text(String(value || '-'), 180, currentY, {
-        width: infoPageW - 225
-      });
-      currentY += Math.max(18, doc.heightOfString(String(value || '-'), { width: infoPageW - 225 }) + 4);
-    };
-
-    addRow('Order ID', orderId);
-    addRow('Order Number', order?.orderNumber);
-    
-    let customerName = '-';
-    if (order?.customer) {
-      if (typeof order.customer === 'object') {
-        customerName = order.customer.name || '-';
-      } else {
-        customerName = order.customer;
-      }
-    }
-    addRow('Customer Name', customerName);
-    
-    let customerEmail = (order?.customer && order.customer.email) || order?.email;
-    let customerPhone = (order?.customer && order.customer.phone) || order?.phone;
-    
-    addRow('Customer Email', customerEmail);
-    addRow('Customer Phone', customerPhone);
-    addRow('Product Name', order?.product);
-    addRow('SKU', order?.sku);
-    addRow('Total Photos Uploaded', `${allImages.length} Photo(s)`);
-    addRow('Quantity', order?.quantity);
-    addRow('Template ID', template.id);
-    addRow('Bleed Size', `${bleedMm}mm`);
-    addRow('Target DPI', `${raster.dpi} DPI`);
-    addRow('Effective DPI', `${raster.effectiveDpi} DPI`);
-    addRow('Resolution Status', raster.belowMinimumDpi ? 'Warning: Below Minimum DPI' : 'Optimal');
-    addRow('Compilation Date', new Date().toLocaleString());
-
-    // Thumbnail Preview Grid of ALL Uploaded Photos on Page 1
-    if (rasters.length > 0 && currentY < 650) {
-      doc.fillColor('#171C62').font('Helvetica-Bold').fontSize(11).text('UPLOADED PHOTOS PREVIEW', 45, currentY + 10);
-      doc.moveTo(45, currentY + 25).lineTo(infoPageW - 36, currentY + 25).lineWidth(1).strokeColor('#e2e8f0').stroke();
-      
-      const gridStartY = currentY + 32;
-      const thumbSize = 45;
-      const gap = 10;
-      const maxCols = 8;
-      
-      rasters.slice(0, 16).forEach((r, idx) => {
-        const col = idx % maxCols;
-        const row = Math.floor(idx / maxCols);
-        const tx = 45 + col * (thumbSize + gap);
-        const ty = gridStartY + row * (thumbSize + gap);
-        
-        doc.lineWidth(0.5).strokeColor('#cbd5e1').rect(tx, ty, thumbSize, thumbSize).stroke();
-        try {
-          doc.image(r.buffer, tx + 1, ty + 1, { width: thumbSize - 2, height: thumbSize - 2 });
-        } catch (e) {}
-      });
-    }
-
-    // Add Artwork Pages for EACH rendered photo
-    rasters.forEach((r, idx) => {
-      doc.addPage({
-        size: [pageW, pageH],
-        margin: 0
-      });
-
+    const bleedPt = mmToPt(bleedMm);
+    const drawArtworkPage = (r) => {
       // Artwork covers the full bleed box.
       doc.image(r.buffer, 0, 0, { width: pageW, height: pageH });
 
       // Crop marks at the trim box corners.
-      const bleedPt = mmToPt(bleedMm);
       if (bleedPt > 0) {
         const markLen = Math.min(bleedPt, mmToPt(5));
         doc.lineWidth(0.5).strokeColor('#000000');
@@ -438,6 +364,13 @@ async function generatePrintPdf({ orderId, order, image, template, transform }) 
           doc.moveTo(x, y + dy * 1).lineTo(x, y + dy * markLen).stroke();
         }
       }
+    };
+
+    // First raster IS page 1 (already sized correctly above); every
+    // subsequent raster gets its own full-bleed page.
+    rasters.forEach((r, idx) => {
+      if (idx > 0) doc.addPage({ size: [pageW, pageH], margin: 0 });
+      drawArtworkPage(r);
     });
 
     doc.end();

@@ -38,7 +38,12 @@ const ALLOWED_TRANSITIONS = {
   assigned:            { printStatus: 'processing',  orderStatus: 'Printing',             workflowStatus: 'printing' },
   printed:             { printStatus: 'processing',  orderStatus: 'Printing',             workflowStatus: 'printing' },
 
-  completed:           { printStatus: 'completed',   orderStatus: 'Delivered',          deliveryStatus: 'delivered', workflowStatus: 'delivered' },
+  // The printer dashboard's own 4-stage vocabulary ends at "Completed",
+  // meaning printing is done and the job is ready to leave the press - NOT
+  // that it has reached the customer. It previously mapped straight to
+  // 'Delivered', so a printer clicking "Done" on a job they'd just finished
+  // printing marked it as already delivered to the customer.
+  completed:           { printStatus: 'completed',   orderStatus: 'Ready for Dispatch',   workflowStatus: 'ready_for_dispatch' },
   ready_for_dispatch:  { printStatus: 'completed',   orderStatus: 'Ready for Dispatch',   workflowStatus: 'ready_for_dispatch' },
   packed:              { printStatus: 'completed',   orderStatus: 'Ready for Dispatch',   workflowStatus: 'ready_for_dispatch' },
   in_transit:          { printStatus: 'completed',   orderStatus: 'In Transit',         deliveryStatus: 'shipped',   workflowStatus: 'in_transit' },
