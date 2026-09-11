@@ -5,6 +5,53 @@ const notificationService = require('./notification.service');
 const { detectProductType, isNonCustomizable, PHOTO_COUNT_BY_TYPE } = require('../utils/shopifyLineItemClassification');
 
 /**
+ * Shopify tells us an order shipped/delivered via `fulfillment_status`
+ * ('fulfilled'/'partial') and, when the shop uses Shopify's own tracking,
+ * a per-fulfillment `shipment_status` ('delivered' is the only value that
+ * unambiguously means "at the customer's door" - the in-transit ones vary
+ * by carrier and aren't worth branching on individually).
+ *
+ * This is intentionally NOT written straight to deliveryStatus/workflowStatus:
+ * Shopify data can be wrong or premature, so it's surfaced to an admin as a
+ * `pendingDeliveryUpdate` for a one-click confirm (or dismiss) instead -
+ * see POST /:id/confirm-delivery-update and /:id/dismiss-delivery-update.
+ */
+function detectPendingDeliveryUpdate(payload, fulfillment, existingOrder) {
+  const shopifyFulfillmentStatus = payload.fulfillment_status || null; // null | 'partial' | 'fulfilled'
+  const shipmentStatus = fulfillment.shipment_status || null;
+
+  let targetStatus = null;
+  if (shipmentStatus === 'delivered') {
+    targetStatus = 'delivered';
+  } else if (shopifyFulfillmentStatus === 'fulfilled' || shopifyFulfillmentStatus === 'partial') {
+    targetStatus = 'shipped';
+  }
+
+  if (!targetStatus) {
+    // No shipped/delivered signal in this payload - leave any existing
+    // pending update alone rather than clearing it.
+    return existingOrder?.pendingDeliveryUpdate || null;
+  }
+  // Already applied (an admin confirmed this, or it was set some other way) -
+  // nothing to flag.
+  if (existingOrder?.deliveryStatus === targetStatus) return null;
+  // Already flagged for the same target - keep the original detectedAt
+  // instead of bumping it on every repeat webhook for the same order.
+  if (existingOrder?.pendingDeliveryUpdate?.status === targetStatus) {
+    return existingOrder.pendingDeliveryUpdate;
+  }
+
+  return {
+    status: targetStatus,
+    trackingNumber: fulfillment.tracking_number || payload.tracking_number || null,
+    trackingUrl: fulfillment.tracking_url || payload.tracking_url || null,
+    trackingCompany: fulfillment.tracking_company || payload.tracking_company || null,
+    shopifyFulfillmentStatus,
+    detectedAt: new Date()
+  };
+}
+
+/**
  * Parses Shopify Order payload, checks for duplicates, saves to MongoDB,
  * and generates a unique customer upload link.
  *
@@ -147,6 +194,7 @@ async function processShopifyOrderWebhook(payload, topic = 'orders/create') {
       trackingNumber,
       trackingUrl,
       trackingCompany,
+      pendingDeliveryUpdate: detectPendingDeliveryUpdate(payload, fulfillment, existingOrder),
       activityLogs: existingOrder?.activityLogs || [
         {
           type: 'WEBHOOK_RECEIVED',
@@ -164,6 +212,18 @@ async function processShopifyOrderWebhook(payload, topic = 'orders/create') {
     const savedOrder = await db.upsertOrder({ id: orderId }, orderData);
     console.log(`[WORKFLOW LOG] STEP 3 - Created/Updated Workflow in MongoDB for Order ${orderId}`);
     savedOrders.push(savedOrder);
+
+    // Log only when this webhook is the one that newly surfaced the pending
+    // update (not on every repeat webhook that still carries the same one).
+    const newlyPending = orderData.pendingDeliveryUpdate
+      && existingOrder?.pendingDeliveryUpdate?.status !== orderData.pendingDeliveryUpdate.status;
+    if (newlyPending) {
+      await db.addActivityLog(
+        orderId,
+        'SHOPIFY_DELIVERY_UPDATE_PENDING',
+        `Shopify reports this order as ${orderData.pendingDeliveryUpdate.status}. Awaiting admin confirmation before updating the customer's tracking view.`
+      );
+    }
 
     // Automatically dispatch Customization (Email & WhatsApp) Upload Link
     // notification for this line item's order.

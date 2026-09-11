@@ -1305,6 +1305,58 @@ router.patch('/:id/status', adminMiddleware, async (req, res) => {
   }
 });
 
+/**
+ * Apply a Shopify-detected shipped/delivered signal (see
+ * shopifyWebhookService.js's detectPendingDeliveryUpdate) to this order's
+ * real deliveryStatus/workflowStatus. Deliberately a separate, explicit
+ * admin action rather than automatic - Shopify's fulfillment data can be
+ * wrong or premature.
+ */
+router.post('/:id/confirm-delivery-update', adminMiddleware, async (req, res) => {
+  try {
+    const order = await db.getOrderById(req.params.id);
+    if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
+    const pending = order.pendingDeliveryUpdate;
+    if (!pending || !pending.status) {
+      return res.status(409).json({ success: false, error: 'No pending Shopify delivery update for this order.' });
+    }
+
+    const updates = {
+      deliveryStatus: pending.status,
+      trackingNumber: pending.trackingNumber || order.trackingNumber,
+      trackingUrl: pending.trackingUrl || order.trackingUrl,
+      trackingCompany: pending.trackingCompany || order.trackingCompany,
+      pendingDeliveryUpdate: null
+    };
+    updates.workflowStatus = reconcileWorkflowStatus({ ...order, ...updates });
+
+    const updated = await db.updateOrder(order.id, updates);
+    await db.addActivityLog(order.id, 'DELIVERY_CONFIRMED',
+      `Admin ${req.user?.email || ''} confirmed Shopify's "${pending.status}" update.`);
+    res.json({ success: true, order: updated });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** Discard a pending Shopify delivery update without applying it (e.g. Shopify's data looked wrong). */
+router.post('/:id/dismiss-delivery-update', adminMiddleware, async (req, res) => {
+  try {
+    const order = await db.getOrderById(req.params.id);
+    if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (!order.pendingDeliveryUpdate) {
+      return res.status(409).json({ success: false, error: 'No pending Shopify delivery update for this order.' });
+    }
+
+    const updated = await db.updateOrder(order.id, { pendingDeliveryUpdate: null });
+    await db.addActivityLog(order.id, 'DELIVERY_UPDATE_DISMISSED',
+      `Admin ${req.user?.email || ''} dismissed a Shopify delivery update.`);
+    res.json({ success: true, order: updated });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Delete order
 router.delete('/:id', adminMiddleware, async (req, res) => {
   try {
