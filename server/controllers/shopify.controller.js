@@ -252,7 +252,7 @@ const syncHandler = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Shopify API Token not configured.' });
     }
 
-    console.log('[API MANUAL SYNC] Starting fast recent orders and products sync...');
+    console.log('[API MANUAL SYNC] Starting recent orders/customers sync + full product catalog sync...');
     
     // Sync only the 50 most recent orders
     const client = createShopifyClient(shop, token);
@@ -263,12 +263,11 @@ const syncHandler = async (req, res) => {
       await shopifyService.syncOrderToDb(o);
     }
     
-    // Sync only the 50 most recent products
-    const prodResponse = await client.get('/products.json', { params: { limit: 50 } });
-    const products = prodResponse.data.products || [];
-    for (const p of products) {
-      await shopifyService.syncProductToDb(p);
-    }
+    // Full product catalog sync (paginated via runFullProductSync) - the
+    // admin SKU-mapping dropdown reads every synced product's variants, so
+    // capping this at "50 most recent" (as it used to be) left the vast
+    // majority of a real catalog's SKUs permanently unreachable there.
+    const productSyncResult = await shopifyService.runFullProductSync(shop, token);
 
     // Sync only the 50 most recent customers
     const custResponse = await client.get('/customers.json', { params: { limit: 50 } });
@@ -277,8 +276,8 @@ const syncHandler = async (req, res) => {
       await shopifyService.syncCustomerToDb(c);
     }
 
-    console.log(`[API MANUAL SYNC] Completed. Synced ${orders.length} orders, ${products.length} products, and ${customers.length} customers.`);
-    res.json({ success: true, message: 'Sync completed successfully' });
+    console.log(`[API MANUAL SYNC] Completed. Synced ${orders.length} orders, ${productSyncResult.count} products (full catalog), and ${customers.length} customers.`);
+    res.json({ success: true, message: 'Sync completed successfully', productsSynced: productSyncResult.count });
   } catch (err) {
     console.error('[API MANUAL SYNC ERROR]', err.message);
     res.status(500).json({ success: false, error: err.message });
