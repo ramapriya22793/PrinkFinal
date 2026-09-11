@@ -2472,7 +2472,6 @@ export default function CustomerPortal({
               <div className="avatar" style={{ width: 32, height: 32, fontSize: 12, borderRadius: '50%', background: 'var(--primary)', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600 }}>{initials}</div>
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontWeight: 600, fontSize: 13, color: '#FFFFFF', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{customerName}</div>
-                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', marginTop: 1 }}>VIP Member</div>
               </div>
             </div>
             <div style={{ marginTop: 8, fontSize: 11, color: 'rgba(255,255,255,0.6)', display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -2847,7 +2846,6 @@ export default function CustomerPortal({
                     </div>
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-primary)' }}>{customerName}</div>
-                      <span className="badge badge-success" style={{ fontSize: 9, marginTop: 2, background: 'rgba(34, 197, 94, 0.1)', color: '#22C55E' }}>VIP Member</span>
                     </div>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12, borderTop: '1px solid var(--border-color)', paddingTop: 12 }}>
@@ -4775,68 +4773,6 @@ export default function CustomerPortal({
                   </div>
                 </div>
               ))}
-            </div>
-          </div>
-        )}
-
-        {/* ==================================================================
-            SUBVIEW: PROFILE
-            ================================================================== */}
-        {activeSubView === 'profile' && (
-          <div className="flex flex-col gap-6">
-            <div>
-              <button className="btn btn-outline btn-sm mb-2" onClick={() => navTo('upload')}>
-                <i className="bi bi-arrow-left" /> My Orders
-              </button>
-              <h1 className="page-heading">My Profile</h1>
-            </div>
-
-            <div className="card" style={{ padding: 28, borderRadius: 24 }}>
-              {/* Profile header */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 28, paddingBottom: 24, borderBottom: '1px solid var(--border-color)', flexWrap: 'wrap' }}>
-                <div className="avatar" style={{ width: 80, height: 80, fontSize: 28 }}>{initials}</div>
-                <div>
-                  <h2 style={{ margin: 0, color: 'var(--primary)', fontSize: 22, fontWeight: 800 }}>{customerName}</h2>
-                  <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4 }}>VIP Premium Member · Since Jan 2026</div>
-                  <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-                    <span className="badge badge-success">Active Account</span>
-                    <span className="badge badge-accent">750 Points</span>
-                    <span className="badge badge-primary">Premium Elite</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Fields */}
-              <div className="grid grid-2 gap-4">
-                <div>
-                  <label className="label">Phone Number</label>
-                  <input type="text" className="input" readOnly value={allOrders[0]?.phone || '+91 98765 43210'} />
-                </div>
-                <div>
-                  <label className="label">Membership Tier</label>
-                  <input type="text" className="input" readOnly value="Premium Elite Gold" />
-                </div>
-                <div>
-                  <label className="label">Loyalty Points</label>
-                  <input type="text" className="input" readOnly value="750 Points (Redeemable)" />
-                </div>
-                <div>
-                  <label className="label">Total Orders</label>
-                  <input type="text" className="input" readOnly value={`${allOrders.length} Orders Placed`} />
-                </div>
-              </div>
-
-              {/* Loyalty bar */}
-              <div style={{ marginTop: 24, padding: '16px 20px', background: 'var(--primary-soft)', borderRadius: 14, border: '1px solid rgba(23,28,98,0.1)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--primary)' }}>Loyalty Progress</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>750 / 1000 points to Platinum</div>
-                </div>
-                <div className="progress-bar">
-                  <div className="progress-bar-fill" style={{ width: '75%' }} />
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 6 }}>250 more points to unlock Platinum tier with free shipping!</div>
-              </div>
             </div>
           </div>
         )}
