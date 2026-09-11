@@ -841,8 +841,18 @@ export default function CustomerPortal({
         if (list.length > 0) {
           setActiveOrder(prevActive => {
             if (!prevActive) return list[0];
-            const updated = list.find((o: any) => o.id === prevActive.id || String(o.orderNumber || '').includes(String(prevActive.orderNumber || prevActive.id)));
-            return updated || list[0];
+            // Exact id match only - an order.orderNumber is shared by every
+            // line item of a multi-item Shopify order (e.g. a Butterfly Box
+            // + a Gift Wrap in the same checkout both carry orderNumber
+            // "86210"), so the previous `orderNumber.includes(...)` fallback
+            // matched ANY sibling line item, not just the one actually
+            // selected. Since this runs on a 5s poll, it would silently swap
+            // the customer from "Upload Photos" on the Butterfly Box over to
+            // the Gift Wrap line item mid-flow. If the previously-selected
+            // order isn't in the fresh list, keep showing it rather than
+            // guessing at a different, unrelated order.
+            const updated = list.find((o: any) => o.id === prevActive.id);
+            return updated || prevActive;
           });
           if (list[0].customer) {
             const cust = list[0].customer;
