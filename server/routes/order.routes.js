@@ -37,11 +37,41 @@ router.get('/', adminMiddleware, async (req, res) => {
     // Base filter: list all orders for Admin Portal
     const baseFilter = {};
 
+    // Mirrors the client's hasCustomizationBeenReceived() (AdminPortal.tsx)
+    // exactly, so the "Ready (Uploaded)" / "Pending Upload" tabs, their
+    // counts, and the actual rows returned all agree with each other.
+    const READY_WORKFLOW_STATUSES = [
+      'photo_uploaded', 'approved', 'sent_to_printer', 'printer_processing',
+      'printing', 'ready_for_dispatch', 'in_transit', 'delivered', 'completed'
+    ];
+    const readyOrConditions = [
+      { customizationStatus: 'completed' },
+      { designLockedAt: { $ne: null } },
+      { 'images.0': { $exists: true } },
+      { workflowStatus: { $in: READY_WORKFLOW_STATUSES } },
+      { uploadStatus: 'ready' }
+    ];
+    // The Approved / Printing / Completed tabs key off workflowStatus alone
+    // in the client's click-through filter (every order has one, defaulting
+    // to 'order_received', so its equality check always wins over the
+    // adminApprovalStatus fallback branches below it) - matched here 1:1.
+    const TAB_FILTERS = {
+      all:             {},
+      ready:           { $or: readyOrConditions },
+      pending:         { $nor: readyOrConditions },
+      approved:        { workflowStatus: 'approved' },
+      sent_to_printer: { workflowStatus: 'sent_to_printer' },
+      completed:       { workflowStatus: 'completed' }
+    };
+
     // Combine with tab status and search
     const filter = { $and: [baseFilter] };
 
-    if (status && status !== 'all') {
-      filter.$and.push({ uploadStatus: status });
+    // Unrecognised status values (there shouldn't be any - this list matches
+    // every tab key the admin Orders page renders) fall through as 'all'
+    // rather than a filter no order can ever match.
+    if (status && status !== 'all' && TAB_FILTERS[status]) {
+      filter.$and.push(TAB_FILTERS[status]);
     }
     if (search) {
       filter.$and.push({
@@ -55,7 +85,10 @@ router.get('/', adminMiddleware, async (req, res) => {
     }
 
     // Run all queries in parallel for speed — fetch full unstripped orders
-    const [orders, total, pending, ready, revision] = await Promise.all([
+    const [
+      orders, total, pending, ready, revision,
+      tabAll, tabReady, tabPending, tabApproved, tabSentToPrinter, tabCompleted
+    ] = await Promise.all([
       Order.find(filter)
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
@@ -64,7 +97,16 @@ router.get('/', adminMiddleware, async (req, res) => {
       Order.countDocuments(filter),
       Order.countDocuments({ $and: [baseFilter, { customizationStatus: { $ne: 'completed' } }] }),
       Order.countDocuments({ $and: [baseFilter, { uploadStatus: 'ready' }] }),
-      Order.countDocuments({ $and: [baseFilter, { uploadStatus: 'revision_requested' }] })
+      Order.countDocuments({ $and: [baseFilter, { uploadStatus: 'revision_requested' }] }),
+      // tabCounts: computed over the full corpus (ignoring the active search,
+      // same as the printer queue's tabCounts), so switching tabs always
+      // shows a count consistent with what that tab will actually contain.
+      Order.countDocuments(baseFilter),
+      Order.countDocuments({ $and: [baseFilter, TAB_FILTERS.ready] }),
+      Order.countDocuments({ $and: [baseFilter, TAB_FILTERS.pending] }),
+      Order.countDocuments({ $and: [baseFilter, TAB_FILTERS.approved] }),
+      Order.countDocuments({ $and: [baseFilter, TAB_FILTERS.sent_to_printer] }),
+      Order.countDocuments({ $and: [baseFilter, TAB_FILTERS.completed] })
     ]);
 
     console.log('[ORDERS] Result: active orders returned:', orders.length, '| total active:', total, '| pending:', pending, '| ready:', ready);
@@ -72,7 +114,15 @@ router.get('/', adminMiddleware, async (req, res) => {
     return res.json({
       orders,
       pagination: { total, page, limit, pages: Math.ceil(total / limit) },
-      stats: { total, pending, ready, revision }
+      stats: { total, pending, ready, revision },
+      tabCounts: {
+        all: tabAll,
+        ready: tabReady,
+        pending: tabPending,
+        approved: tabApproved,
+        sent_to_printer: tabSentToPrinter,
+        completed: tabCompleted
+      }
     });
   } catch (err) {
     console.error('[GET /api/orders] Error:', err.message, err.stack);

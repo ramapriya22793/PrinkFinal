@@ -658,7 +658,15 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
       }, 10000);
       return () => clearInterval(interval);
     }
-  }, [screen]);
+    // orderTab/orderSearch are read via fetchOrders()'s defaults, not passed
+    // explicitly, so without them here this effect's closure - and the
+    // interval's - froze on whichever tab/search was active when `screen`
+    // last changed (typically just once, at login). Every 10s poll then
+    // silently reverted the Orders table back to the "All" tab's data,
+    // even while a different tab was selected and showing its own (correct)
+    // count. Recreating the interval whenever either changes keeps the poll
+    // aimed at what's actually on screen.
+  }, [screen, orderTab, orderSearch]);
 
   // Lazy, section-triggered fetches: each list loads the first time (and
   // every time) its section is opened, not preemptively on login.
