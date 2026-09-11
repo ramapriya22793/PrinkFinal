@@ -1199,14 +1199,6 @@ select.input { cursor: pointer; }
 /* ── Responsive ──────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .portal-layout { grid-template-columns: 1fr; }
-  .portal-sidebar:not(.collapsible-sidebar) {
-    border-right: none;
-    border-bottom: 1px solid var(--border-color);
-    flex-direction: row;
-    overflow-x: auto;
-    padding: 10px;
-    gap: 4px;
-  }
   .sidebar-item { white-space: nowrap; }
   .portal-content { padding: 20px; }
   .admin-split-layout { grid-template-columns: 1fr; }
@@ -2116,7 +2108,9 @@ select.input { cursor: pointer; }
   
   /* Spacings & Typography */
   .portal-content {
-    padding: 16px !important;
+    /* top padding clears the fixed .mobile-menu-btn hamburger (top:10px + 40px tall)
+       so it doesn't sit on top of in-flow content like a subview's back button */
+    padding: 64px 16px 16px !important;
   }
   .section-header {
     flex-direction: column;
@@ -2217,16 +2211,6 @@ select.input { cursor: pointer; }
   }
   .tab-item {
     white-space: nowrap !important;
-  }
-  
-  /* Override default horizontal sidebar styles */
-  .portal-layout > .portal-sidebar:not(.collapsible-sidebar) {
-    border-right: none;
-    border-bottom: 1px solid var(--border-color);
-    flex-direction: row;
-    overflow-x: auto;
-    padding: 10px;
-    gap: 4px;
   }
 }
 
