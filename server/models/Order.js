@@ -13,6 +13,12 @@ const orderSchema = new mongoose.Schema({
   product: { type: String },
   productType: { type: String },
   productImage: { type: String },
+  // Line item's Shopify product_id, used to (re-)resolve productImage
+  // against the synced ShopifyProduct catalog - kept even when productImage
+  // itself couldn't be resolved yet (e.g. the product catalog sync hadn't
+  // caught up), so a later backfill has an exact join key instead of
+  // falling back to fuzzy SKU matching.
+  shopifyProductId: { type: String },
   // ─── Customization Config ────────────────────────────────────────────────
   // Whether this product/line-item requires customer photo upload.
   requiresCustomization: { type: Boolean, default: true },

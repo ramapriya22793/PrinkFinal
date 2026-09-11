@@ -212,8 +212,9 @@ const syncOrderToDb = async (o) => {
 
     // Fetch product image from synced ShopifyProduct if present
     let productImage = '';
+    const shopifyProductId = item.product_id ? String(item.product_id) : '';
     try {
-      const dbProduct = await ShopifyProduct.findOne({ shopifyProductId: String(item.product_id) }).lean();
+      const dbProduct = shopifyProductId ? await ShopifyProduct.findOne({ shopifyProductId }).lean() : null;
       if (dbProduct && dbProduct.images && dbProduct.images.length > 0) {
         productImage = dbProduct.images[0];
       }
@@ -252,7 +253,6 @@ const syncOrderToDb = async (o) => {
       },
       product: item.title,
       productType: pType,
-      productImage: productImage,
       requiresCustomization,
       requiredPhotoCount,
       sku: item.sku || '',
@@ -261,6 +261,11 @@ const syncOrderToDb = async (o) => {
       shippingAddress: o.shipping_address,
       dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString()
     };
+    // Only set when resolved this run, so a sync that can't (re-)resolve an
+    // image/id doesn't blank out a value a previous sync or the real-time
+    // webhook already found.
+    if (productImage) orderDoc.productImage = productImage;
+    if (shopifyProductId) orderDoc.shopifyProductId = shopifyProductId;
 
     await Order.findOneAndUpdate(
       { id: portalOrderId },

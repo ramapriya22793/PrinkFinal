@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const db = require('../db');
 const ShopifyOrder = require('../models/ShopifyOrder');
+const ShopifyProduct = require('../models/ShopifyProduct');
 const notificationService = require('./notification.service');
 const { detectProductType, isNonCustomizable, PHOTO_COUNT_BY_TYPE } = require('../utils/shopifyLineItemClassification');
 
@@ -114,6 +115,27 @@ async function processShopifyOrderWebhook(payload, topic = 'orders/create') {
       console.log(`[SHOPIFY WEBHOOK SERVICE] Duplicate order detected for orderId: ${existingOrder.id}. Updating record.`);
     }
 
+    // Product image, for the customer portal's Orders list. Real-time
+    // webhook payloads never carry a product image - only a product_id -
+    // so this depends on the product already being synced locally via the
+    // Shopify product catalog sync (see shopify.service.js's
+    // runFullProductSync / the scheduled job in jobs/sync.js). Persisting
+    // shopifyProductId (not just the resolved image) means a later backfill
+    // can re-resolve this once the catalog sync has caught up, instead of
+    // falling back to fuzzy SKU matching.
+    let productImage = '';
+    const shopifyProductId = item.product_id ? String(item.product_id) : '';
+    try {
+      if (shopifyProductId) {
+        const dbProduct = await ShopifyProduct.findOne({ shopifyProductId }).lean();
+        if (dbProduct && dbProduct.images && dbProduct.images.length > 0) {
+          productImage = dbProduct.images[0];
+        }
+      }
+    } catch (err) {
+      console.warn('[SHOPIFY WEBHOOK SERVICE] Failed to resolve productImage from ShopifyProduct:', err.message);
+    }
+
     // Customization Eligibility & Photo Count
     const nonCustomizable = isNonCustomizable(productTitle, sku);
     const productType = detectProductType(productTitle);
@@ -170,6 +192,8 @@ async function processShopifyOrderWebhook(payload, topic = 'orders/create') {
       customer,
       product: productTitle,
       productType: matchedProductType,
+      productImage: productImage || existingOrder?.productImage || '',
+      shopifyProductId: shopifyProductId || existingOrder?.shopifyProductId || '',
       printTemplate,
       customizationRules,
       sku,
