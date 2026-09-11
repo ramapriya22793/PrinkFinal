@@ -360,7 +360,25 @@ process.on('unhandledRejection', reason => {
 // Connect DB & Start Server
 connectDB(); // Ensure DB connects in Vercel serverless environment
 
+// Every test file boots the app via `require('../index.js')` (see
+// tests/*.test.js), so anything here must stay behind this same guard -
+// including the scheduled sync below, which starts an hourly cron (a
+// handle that never lets the process exit) and fires a real Shopify API
+// call 5s after start. Putting that outside this guard made every test
+// run spin up a live cron + network call and hang forever waiting for a
+// process that would never exit on its own.
 if (require.main === module) {
+  // Scheduled Shopify product-catalog sync (hourly, plus once on startup) -
+  // this used to only be wired up in server/app.js, an entry point nothing
+  // actually runs (package.json's main/start/dev scripts all point to this
+  // file), so it silently never ran.
+  connectDB()
+    .then(() => {
+      const { startScheduledSyncJobs } = require('./jobs/sync');
+      startScheduledSyncJobs();
+    })
+    .catch(err => console.error('[STARTUP] Skipping scheduled sync jobs - DB connection failed:', err.message));
+
   app.listen(PORT, () => {
     console.log(`\n======================================================`);
     console.log(`  THE PRINK - Express Backend Server`);
