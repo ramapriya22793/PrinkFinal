@@ -3,7 +3,7 @@
 // =========================================================================
 
 export type PortalType = 'customer' | 'admin' | 'printer';
-export type CustomerSubView = 'dashboard' | 'editor' | 'tracking' | 'drafts' | 'upload' | 'preview' | 'profile' | 'support' | 'templates';
+export type CustomerSubView = 'dashboard' | 'editor' | 'tracking' | 'drafts' | 'upload' | 'preview' | 'support' | 'templates';
 export type AdminSection = 'overview' | 'orders' | 'monitor' | 'templates' | 'queue' | 'reports' | 'settings' | 'workflow' | 'sku-mappings';
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
 export type CropMaskType = 'circle' | 'square' | 'rect';

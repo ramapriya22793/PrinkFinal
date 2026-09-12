@@ -38,7 +38,12 @@ const ALLOWED_TRANSITIONS = {
   assigned:            { printStatus: 'processing',  orderStatus: 'Printing',             workflowStatus: 'printing' },
   printed:             { printStatus: 'processing',  orderStatus: 'Printing',             workflowStatus: 'printing' },
 
-  completed:           { printStatus: 'completed',   orderStatus: 'Delivered',          deliveryStatus: 'delivered', workflowStatus: 'delivered' },
+  // The printer dashboard's own 4-stage vocabulary ends at "Completed",
+  // meaning printing is done and the job is ready to leave the press - NOT
+  // that it has reached the customer. It previously mapped straight to
+  // 'Delivered', so a printer clicking "Done" on a job they'd just finished
+  // printing marked it as already delivered to the customer.
+  completed:           { printStatus: 'completed',   orderStatus: 'Ready for Dispatch',   workflowStatus: 'ready_for_dispatch' },
   ready_for_dispatch:  { printStatus: 'completed',   orderStatus: 'Ready for Dispatch',   workflowStatus: 'ready_for_dispatch' },
   packed:              { printStatus: 'completed',   orderStatus: 'Ready for Dispatch',   workflowStatus: 'ready_for_dispatch' },
   in_transit:          { printStatus: 'completed',   orderStatus: 'In Transit',         deliveryStatus: 'shipped',   workflowStatus: 'in_transit' },
@@ -49,31 +54,11 @@ const ALLOWED_TRANSITIONS = {
 
 const STAGE_ORDER = ['pending', 'queued', 'processing', 'completed'];
 
-// Target vocabulary must match the frontend's PrintStatus type exactly
-// ('processing', not 'printing') - the workflowStatus override below already
-// used 'processing', so this previously produced two different labels for
-// the same conceptual state depending on which field drove it. Orders
-// reaching 'processing' only through printStatus (never via a
-// printer_processing workflowStatus) were silently invisible in the
-// printer app's "Printing" tab, since nothing there checks for 'printing'.
-const DASHBOARD_STATUS = {
-  pending:       'pending',
-  queued:        'print-ready',
-  'print-ready': 'print-ready',
-  ready:         'print-ready',
-  processing:    'processing',
-  printing:      'processing',
-  completed:     'completed'
-};
-
-/** Derive the frontend's PrintStatus vocabulary from the stored fields. */
-function deriveDashStatus(printStatus, workflowStatus) {
-  let dashStatus = DASHBOARD_STATUS[printStatus] || 'pending';
-  if (workflowStatus === 'sent_to_printer') dashStatus = 'pending';
-  else if (workflowStatus === 'printer_processing') dashStatus = 'processing';
-  else if (workflowStatus === 'completed') dashStatus = 'completed';
-  return dashStatus;
-}
+// deriveDashStatus (order -> 'pending'|'print-ready'|'processing'|'completed')
+// lives in server/utils/orderStatus.js so the admin app, the printer app and
+// any migration all agree on what "Print Ready" means. It requires a
+// genuinely approved + rendered job, not just printStatus:'queued'.
+const { deriveDashStatus } = require('../utils/orderStatus');
 
 function serializeQueueItem(o) {
   const filesArray = Array.isArray(o.printFiles) ? o.printFiles : [];
@@ -88,7 +73,7 @@ function serializeQueueItem(o) {
     sku: o.sku,
     quantity: o.quantity,
     templateId: o.templateId,
-    status: deriveDashStatus(o.printStatus, o.workflowStatus),
+    status: deriveDashStatus(o),
     printStatus: o.printStatus,
     workflowStatus: o.workflowStatus,
     orderStatus: o.orderStatus,
@@ -131,6 +116,7 @@ router.get('/queue', printerAuth, async (req, res) => {
 
     const lightProjection = {
       _id: 0, id: 1, orderNumber: 1, printStatus: 1, workflowStatus: 1,
+      adminApprovalStatus: 1, printGenerationStatus: 1, deliveryStatus: 1,
       product: 1, sku: 1, createdAt: 1,
       'customer.name': 1, 'customer.email': 1
     };
@@ -139,7 +125,7 @@ router.get('/queue', printerAuth, async (req, res) => {
     const tabCounts = { all: light.length, pending: 0, 'print-ready': 0, processing: 0, completed: 0 };
     const matches = [];
     for (const o of light) {
-      const dashStatus = deriveDashStatus(o.printStatus, o.workflowStatus);
+      const dashStatus = deriveDashStatus(o);
       if (tabCounts[dashStatus] !== undefined) tabCounts[dashStatus]++;
 
       if (status && status !== 'all' && dashStatus !== status) continue;
@@ -238,7 +224,23 @@ router.get('/download/:id', printerAuth, async (req, res) => {
         onDisk = path.join(os.tmpdir(), path.basename(file.url));
       }
       if (!fs.existsSync(onDisk)) {
-        needsGeneration = true;
+        // The local copy is gone (server restart/redeploy/different
+        // serverless instance - the common case, not the exception, since
+        // S3 is the only persistent store for generated print files). Try
+        // restoring the existing file from S3 before falling back to
+        // regenerating it from scratch.
+        try {
+          const { existsInS3, restoreFromS3 } = require('../utils/s3Storage');
+          const s3Key = `print/${path.basename(file.url)}`;
+          if (await existsInS3(s3Key)) {
+            await restoreFromS3(s3Key, onDisk);
+          }
+        } catch (restoreErr) {
+          console.warn(`[PRINTER DOWNLOAD] S3 restore attempt failed for order ${order.id}:`, restoreErr.message);
+        }
+        if (!fs.existsSync(onDisk)) {
+          needsGeneration = true;
+        }
       }
     }
 
@@ -279,10 +281,15 @@ router.get('/download/:id', printerAuth, async (req, res) => {
             effectiveDpi: generatedFile.effectiveDpi
           };
 
-          if (file && file.url) {
-            if (generatedFile.path !== onDisk) {
-              fs.renameSync(generatedFile.path, onDisk);
-            }
+          // The generator already persisted the file to S3 (its sole
+          // durable store) and deletes its own local scratch copy once
+          // that upload succeeds - so generatedFile.path is frequently
+          // already gone by the time we get here. Renaming into the old
+          // `onDisk` slot only works if that scratch file still exists;
+          // otherwise just point the order at the newly generated file's
+          // own filename/URL instead of forcing it into the stale one.
+          if (file && file.url && generatedFile.path !== onDisk && fs.existsSync(generatedFile.path)) {
+            fs.renameSync(generatedFile.path, onDisk);
           } else {
             file = newFile;
             await db.updateOrder(order.id, {

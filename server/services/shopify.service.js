@@ -202,27 +202,19 @@ const syncOrderToDb = async (o) => {
     year: 'numeric'
   });
 
+  const { detectProductType, isNonCustomizable, PHOTO_COUNT_BY_TYPE } = require('../utils/shopifyLineItemClassification');
+
   const lineItemsList = o.line_items || [];
   for (const item of lineItemsList) {
     const portalOrderId = `${o.name || '#' + o.order_number}-${item.id}`;
-    
-    let pType = 'canvas';
-    const titleLower = item.title.toLowerCase();
-    if (titleLower.includes('mug')) pType = 'mug';
-    else if (titleLower.includes('frame')) pType = 'frame';
-    else if (titleLower.includes('calendar')) pType = 'calendar';
-    else if (titleLower.includes('book') || titleLower.includes('photobook')) pType = 'photobook';
-    else if (titleLower.includes('magazine')) pType = 'magazine';
-    else if (titleLower.includes('butterfly')) pType = 'butterfly';
-    else if (titleLower.includes('tshirt') || titleLower.includes('t-shirt') || titleLower.includes('shirt')) pType = 'tshirt';
-    else if (titleLower.includes('pillow') || titleLower.includes('cushion')) pType = 'pillow';
-    else if (titleLower.includes('keychain') || titleLower.includes('key chain')) pType = 'keychain';
-    else if (titleLower.includes('mobilecase') || titleLower.includes('mobile case') || titleLower.includes('phone case')) pType = 'mobilecase';
+
+    const pType = detectProductType(item.title);
 
     // Fetch product image from synced ShopifyProduct if present
     let productImage = '';
+    const shopifyProductId = item.product_id ? String(item.product_id) : '';
     try {
-      const dbProduct = await ShopifyProduct.findOne({ shopifyProductId: String(item.product_id) }).lean();
+      const dbProduct = shopifyProductId ? await ShopifyProduct.findOne({ shopifyProductId }).lean() : null;
       if (dbProduct && dbProduct.images && dbProduct.images.length > 0) {
         productImage = dbProduct.images[0];
       }
@@ -231,18 +223,10 @@ const syncOrderToDb = async (o) => {
     }
 
     // ── Resolve customization requirements from SKU record ──────────────────
-    // Photo count per product type (fallback when SKU is not found in DB)
-    const photoCountByType = {
-      butterfly: 8, magazine: 4, photobook: 24,
-      calendar: 12, frame: 4, mug: 1, tshirt: 1,
-      mobilecase: 1, pillow: 1, keychain: 2, canvas: 1
-    };
-    // Non-customizable product identifiers (no photo upload needed)
-    const nonCustomizableKeywords = ['gift card', 'gift-card', 'voucher', 'shipping', 'donation'];
-    const isNonCustomizable = nonCustomizableKeywords.some(k => titleLower.includes(k));
+    const nonCustomizable = isNonCustomizable(item.title, item.sku);
 
-    let requiresCustomization = !isNonCustomizable;
-    let requiredPhotoCount = isNonCustomizable ? 0 : (photoCountByType[pType] || 1);
+    let requiresCustomization = !nonCustomizable;
+    let requiredPhotoCount = nonCustomizable ? 0 : (PHOTO_COUNT_BY_TYPE[pType] || 1);
 
     try {
       const SKU = require('../models/SKU');
@@ -269,7 +253,6 @@ const syncOrderToDb = async (o) => {
       },
       product: item.title,
       productType: pType,
-      productImage: productImage,
       requiresCustomization,
       requiredPhotoCount,
       sku: item.sku || '',
@@ -278,6 +261,11 @@ const syncOrderToDb = async (o) => {
       shippingAddress: o.shipping_address,
       dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString()
     };
+    // Only set when resolved this run, so a sync that can't (re-)resolve an
+    // image/id doesn't blank out a value a previous sync or the real-time
+    // webhook already found.
+    if (productImage) orderDoc.productImage = productImage;
+    if (shopifyProductId) orderDoc.shopifyProductId = shopifyProductId;
 
     await Order.findOneAndUpdate(
       { id: portalOrderId },

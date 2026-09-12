@@ -39,7 +39,8 @@ export default function AdminUserManager() {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
-        setUsers(await res.json());
+        const data = await res.json();
+        setUsers(Array.isArray(data) ? data : data.users || []);
       } else {
         showToast('Failed to fetch users', 'error');
       }
@@ -234,7 +235,7 @@ export default function AdminUserManager() {
       </div>
 
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+        <div className="modal-overlay active" onClick={() => setShowModal(false)}>
           <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}>
             <h2 style={{ marginBottom: '1.5rem', fontSize: '1.2rem', color: 'var(--primary)' }}>
               {editingUser ? 'Edit User' : 'Create User'}

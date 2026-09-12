@@ -1199,14 +1199,6 @@ select.input { cursor: pointer; }
 /* ── Responsive ──────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .portal-layout { grid-template-columns: 1fr; }
-  .portal-sidebar:not(.collapsible-sidebar) {
-    border-right: none;
-    border-bottom: 1px solid var(--border-color);
-    flex-direction: row;
-    overflow-x: auto;
-    padding: 10px;
-    gap: 4px;
-  }
   .sidebar-item { white-space: nowrap; }
   .portal-content { padding: 20px; }
   .admin-split-layout { grid-template-columns: 1fr; }
@@ -2116,7 +2108,9 @@ select.input { cursor: pointer; }
   
   /* Spacings & Typography */
   .portal-content {
-    padding: 16px !important;
+    /* top padding clears the fixed .mobile-menu-btn hamburger (top:10px + 40px tall)
+       so it doesn't sit on top of in-flow content like a subview's back button */
+    padding: 64px 16px 16px !important;
   }
   .section-header {
     flex-direction: column;
@@ -2217,16 +2211,6 @@ select.input { cursor: pointer; }
   }
   .tab-item {
     white-space: nowrap !important;
-  }
-  
-  /* Override default horizontal sidebar styles */
-  .portal-layout > .portal-sidebar:not(.collapsible-sidebar) {
-    border-right: none;
-    border-bottom: 1px solid var(--border-color);
-    flex-direction: row;
-    overflow-x: auto;
-    padding: 10px;
-    gap: 4px;
   }
 }
 
@@ -2807,6 +2791,18 @@ select.input { cursor: pointer; }
   color: var(--accent);
   animation: uploadBounce 1s ease-in-out infinite;
 }
+.wiz-upload-zone.satisfied {
+  border-color: var(--success);
+  border-style: solid;
+  background: var(--success-bg);
+}
+.wiz-upload-zone.satisfied .wiz-upload-icon {
+  animation: none;
+}
+.wiz-upload-zone.satisfied:hover {
+  border-color: var(--success);
+  box-shadow: 0 0 0 6px rgba(34,197,94,0.08), 0 20px 60px rgba(34,197,94,0.10);
+}
 
 /* ── Step 3: Editor Workspace ─────────────────────────────────────────────── */
 .wiz-editor-layout {
@@ -2953,6 +2949,39 @@ select.input { cursor: pointer; }
   background: var(--error);
   transform: scale(1.15);
 }
+.wiz-thumb img { cursor: zoom-in; }
+/* Explicit move controls for touch devices, where the drag-to-rearrange
+   above (HTML5 drag-and-drop) never fires - see moveImage() in
+   CustomerPortal.tsx. Always tappable/clickable, not just visible on
+   hover, since hover isn't a real state on touch. */
+.wiz-thumb-move-row {
+  position: absolute;
+  bottom: 5px;
+  left: 5px;
+  right: 5px;
+  display: flex;
+  justify-content: space-between;
+  z-index: 10;
+}
+.wiz-thumb-move {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(23,28,98,0.85);
+  backdrop-filter: blur(4px);
+  color: #fff;
+  border: none;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+  transition: all 0.2s ease;
+}
+.wiz-thumb-move:hover { background: var(--accent); transform: scale(1.15); }
+.wiz-thumb-move:disabled { opacity: 0.35; cursor: default; }
+.wiz-thumb-move:disabled:hover { background: rgba(23,28,98,0.85); transform: none; }
 
 /* ── Selected product banner ───────────────────────────────────────────────── */
 .wiz-selected-banner {
@@ -3227,5 +3256,5 @@ select.input { cursor: pointer; }
     display: none !important;
   }
 }
-
+
 

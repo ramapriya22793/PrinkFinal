@@ -94,7 +94,9 @@ export const isCustomizable = (o: any) => {
   if (o.requiresCustomization === true || (typeof o.requiredPhotoCount === 'number' && o.requiredPhotoCount > 0)) return true;
   const t = (o.productType || '').toLowerCase();
   const p = (o.product || '').toLowerCase();
-  const nonCustomizableKeywords = ['gift card', 'gift-card', 'voucher', 'shipping', 'donation'];
+  // "gift wrap" is a distinct phrase from "gift card" - a common Shopify
+  // add-on line item that was previously falling through to customizable.
+  const nonCustomizableKeywords = ['gift card', 'gift-card', 'gift wrap', 'gift-wrap', 'giftwrap', 'voucher', 'shipping', 'donation'];
   if (nonCustomizableKeywords.some(k => t.includes(k) || p.includes(k))) return false;
   return true;
 };
@@ -179,6 +181,47 @@ export default function CustomerPortal({
   const [isDraggingPhoto, setIsDraggingPhoto] = useState(false);
   const dragStartPos = useRef({ x: 0, y: 0 });
   const photoOffsetStart = useRef({ x: 0, y: 0 });
+
+  // photoOffsetX/Y above are raw drag-delta PIXELS relative to whichever
+  // mockup crop-box is currently rendered (each product type uses a
+  // different hardcoded box size). A plain ref (not state) so it survives
+  // the crop editor unmounting once the wizard moves past step 3 - it's
+  // read again at submit time in step 4/5, after the measured element is
+  // long gone. See buildCanonicalPhotoTransform below for why this exists.
+  const activeCropContainerSizeRef = useRef({ w: 1, h: 1 });
+  const measureCropContainer = (el: HTMLImageElement | null) => {
+    if (el && el.clientWidth > 0 && el.clientHeight > 0) {
+      activeCropContainerSizeRef.current = { w: el.clientWidth, h: el.clientHeight };
+    }
+  };
+
+  /**
+   * Converts the pixel-based crop editor state into the canonical fractional
+   * DesignTransform (see apps/customer/src/lib/designTransform.ts /
+   * server/utils/designTransform.js) that the print-file renderer expects.
+   *
+   * Without this conversion, the customer's zoom/rotate/drag never reaches
+   * the backend at all - images are submitted with no `transform` field, so
+   * server/routes/order.routes.js falls back to fromLegacyImage(img), which
+   * finds nothing usable and defaults to plain centered identity. The print
+   * file then ignores whatever the customer actually positioned. scale and
+   * rotation carry over unchanged (the editor already renders with
+   * object-fit:cover + CSS scale/rotate, which is exactly what
+   * computePlacement's cover-fit baseline assumes); only the pixel offsets
+   * need dividing by the actual on-screen crop-box size to become a
+   * resolution-independent fraction of the area.
+   */
+  const buildCanonicalPhotoTransform = () => {
+    const { w, h } = activeCropContainerSizeRef.current;
+    return {
+      scale: photoScale,
+      rotation: photoRotation,
+      offsetX: photoOffsetX / (w || 1),
+      offsetY: photoOffsetY / (h || 1),
+      brightness: 100,
+      contrast: 100
+    };
+  };
 
   const [is3DMode, setIs3DMode] = useState(true);
   const [isButterflyBoxClosed, setIsButterflyBoxClosed] = useState(true);
@@ -679,6 +722,14 @@ export default function CustomerPortal({
   const [cropScale, setCropScale]   = useState(1);
   const [cropRot, setCropRot]       = useState(0);
 
+  // ── Photo review lightbox ────────────────────────────────────────────────────
+  // Lets a customer check any single uploaded photo at full size, with
+  // prev/next navigation across all of them - works the same regardless of
+  // how many photos the product needs (1 for a frame, 24 for a photobook),
+  // unlike the old flow where only the one auto-selected "live preview"
+  // photo was ever shown at a useful size.
+  const [reviewPhotoIdx, setReviewPhotoIdx] = useState<number | null>(null);
+
   // ── Contact Support Modal state ─────────────────────────────────────────────
   const [showSupportModal, setShowSupportModal] = useState(false);
 
@@ -790,8 +841,18 @@ export default function CustomerPortal({
         if (list.length > 0) {
           setActiveOrder(prevActive => {
             if (!prevActive) return list[0];
-            const updated = list.find((o: any) => o.id === prevActive.id || String(o.orderNumber || '').includes(String(prevActive.orderNumber || prevActive.id)));
-            return updated || list[0];
+            // Exact id match only - an order.orderNumber is shared by every
+            // line item of a multi-item Shopify order (e.g. a Butterfly Box
+            // + a Gift Wrap in the same checkout both carry orderNumber
+            // "86210"), so the previous `orderNumber.includes(...)` fallback
+            // matched ANY sibling line item, not just the one actually
+            // selected. Since this runs on a 5s poll, it would silently swap
+            // the customer from "Upload Photos" on the Butterfly Box over to
+            // the Gift Wrap line item mid-flow. If the previously-selected
+            // order isn't in the fresh list, keep showing it rather than
+            // guessing at a different, unrelated order.
+            const updated = list.find((o: any) => o.id === prevActive.id);
+            return updated || prevActive;
           });
           if (list[0].customer) {
             const cust = list[0].customer;
@@ -1147,6 +1208,14 @@ export default function CustomerPortal({
       } : undefined
     };
 
+    // Butterfly Box/Magazine have no working per-photo crop UI in this editor
+    // (see buildCanonicalPhotoTransform's doc comment) - only attach the
+    // canonical transform for product types the customer actually dragged/
+    // zoomed/rotated a photo in, so we never stamp an unrelated shared
+    // transform across their multiple photos.
+    const isButterflyOrMagazine = isButterfly(activeOrder) || isMagazine(activeOrder);
+    const canonicalTransform = isButterflyOrMagazine ? undefined : buildCanonicalPhotoTransform();
+
     try {
       const token = localStorage.getItem('customer_token');
       const payload = {
@@ -1158,8 +1227,9 @@ export default function CustomerPortal({
           src: img.url || img.src,
           url: img.url || img.src,
           previewUrl: img.previewUrl,
-          serverFilename: img.serverFilename || img.name
-        })) : (livePreviewPhoto ? [{ id: 'img_1', name: 'upload.jpg', src: livePreviewPhoto, url: livePreviewPhoto, serverFilename: 'upload.jpg' }] : [])
+          serverFilename: img.serverFilename || img.name,
+          ...(canonicalTransform ? { transform: canonicalTransform } : {})
+        })) : (livePreviewPhoto ? [{ id: 'img_1', name: 'upload.jpg', src: livePreviewPhoto, url: livePreviewPhoto, serverFilename: 'upload.jpg', ...(canonicalTransform ? { transform: canonicalTransform } : {}) }] : [])
       };
       
       const res = await fetch(`/api/orders/${encodeURIComponent(activeOrder.id)}/design`, {
@@ -1172,7 +1242,7 @@ export default function CustomerPortal({
       });
       
       if (res.ok) {
-        showToast('Design submitted successfully! Status: Pending Admin Review.', 'success');
+        showToast('Photos submitted successfully! Status: Order Under Process.', 'success');
         fetchActiveOrder(); // refresh list
         navTo('tracking'); // go to tracking
         return true;
@@ -1395,7 +1465,7 @@ export default function CustomerPortal({
       setSubmittedOrderId(activeOrder.id);
       setSubmissionDone(true);
       setSubView('tracking');
-      showToast('🎉 Design submitted! Admin will review shortly.', 'success');
+      showToast('🎉 Photos submitted successfully! Your order is now being processed for printing.', 'success');
     } catch (e: any) {
       if (isLiveMode) {
         showToast(e.message || 'Failed to submit design.', 'error');
@@ -1404,7 +1474,7 @@ export default function CustomerPortal({
         setSubmittedOrderId(activeOrder?.id || '');
         setSubmissionDone(true);
         setSubView('tracking');
-        showToast('Design submitted for admin review!', 'success');
+        showToast('Photos submitted successfully!', 'success');
       }
     }
   };
@@ -1599,6 +1669,21 @@ export default function CustomerPortal({
     if (dragIndex === null || dragIndex === idx) return;
     setImages(prev => { const a = [...prev]; const [m] = a.splice(dragIndex, 1); a.splice(idx, 0, m); return a; });
     setDragIndex(null);
+  };
+  // Touch devices never fire the HTML5 drag events above (onDragStart/
+  // onDrop only fire for mouse-driven drags), so reordering silently did
+  // nothing on mobile. Rather than reimplementing drag physics for touch,
+  // this gives every thumbnail explicit move-left/move-right controls that
+  // work identically via tap or click - kept alongside the existing mouse
+  // drag (still nicer on desktop), not replacing it.
+  const moveImage = (idx: number, direction: -1 | 1) => {
+    const target = idx + direction;
+    setImages(prev => {
+      if (target < 0 || target >= prev.length) return prev;
+      const a = [...prev];
+      [a[idx], a[target]] = [a[target], a[idx]];
+      return a;
+    });
   };
 
   const openCamera = async (mode: 'user' | 'environment' = facingMode) => {
@@ -1810,28 +1895,17 @@ export default function CustomerPortal({
     return fallbacks[order.productType || 'canvas'] || fallbacks.canvas;
   };
 
-  const getRequiredPhotoCount = (order: Order) => {
-    const type = order.productType || 'canvas';
-    const limits: Record<string, number> = {
-      tshirt: 1,
-      mug: 1,
-      mobilecase: 1,
-      frame: 4,
-      pillow: 1,
-      photobook: 24,
-      keychain: 2,
-      canvas: 1,
-      calendar: 12,
-      butterfly: 10,
-    };
-    return limits[type] || 1;
-  };
-
-  const getUploadedPhotoCount = (order: Order) => {
-    return order.images ? order.images.length : 0;
-  };
-
-
+  // getRequiredPhotoCount/getUploadedPhotoCount are NOT redefined here -
+  // this component uses the module-level exports above (which check the
+  // order's actual requiredPhotoCount from its SKU mapping first, falling
+  // back to a per-type table only when that's absent). A local const of the
+  // same name used to shadow them with a second, DIFFERENT hardcoded table
+  // (frame:4 vs the real 1, butterfly:10 vs the real 8) that never
+  // consulted the order's real requiredPhotoCount at all - the exact cause
+  // of "Photos Required: 1" on the dashboard card disagreeing with "this
+  // product requires 4 photo(s)" from the upload confirmation for the same
+  // order. See getRequiredPhotoCount's own definition near the top of this
+  // file for the single source of truth now used everywhere in this file.
 
   const handleOtpRequest = useCallback(async () => {
     if (!phone.trim()) { showToast('Please enter your phone number', 'warning'); return; }
@@ -2139,7 +2213,7 @@ export default function CustomerPortal({
     if (order.workflowStatus === 'sent_to_printer')    return <span className="badge badge-primary" style={{ background: '#dbeafe', color: '#1e40af', fontWeight: 700 }}><i className="bi bi-file-earmark-pdf" /> Sent to Printer Queue</span>;
     if (order.workflowStatus === 'approved')           return <span className="badge badge-success" style={{ background: '#dcfce7', color: '#15803d', fontWeight: 700 }}><i className="bi bi-patch-check-fill" /> Design Approved</span>;
     if (order.workflowStatus === 'rejected' || order.adminApprovalStatus === 'rejected') return <span className="badge badge-error" style={{ background: '#fee2e2', color: '#dc2626', fontWeight: 700 }}><i className="bi bi-x-circle-fill" /> Rejected — Re-upload Required</span>;
-    if (order.workflowStatus === 'photo_uploaded' || order.customizationStatus === 'completed' || order.designLockedAt) return <span className="badge badge-info" style={{ background: '#e0f2fe', color: '#0369a1', fontWeight: 700 }}><i className="bi bi-shield-fill-exclamation" /> Under Admin Review</span>;
+    if (order.workflowStatus === 'photo_uploaded' || order.customizationStatus === 'completed' || order.designLockedAt) return <span className="badge badge-info" style={{ background: '#e0f2fe', color: '#0369a1', fontWeight: 700 }}><i className="bi bi-hourglass-split" /> Order Under Process</span>;
     if (order.customizationStatus === 'in-progress') return <span className="badge badge-accent" style={{ fontWeight: 700 }}><i className="bi bi-palette" /> Editing Draft</span>;
     return <span className="badge badge-warning" style={{ background: '#fef3c7', color: '#d97706', fontWeight: 700 }}><i className="bi bi-hourglass-split" /> Awaiting Photos</span>;
   };
@@ -2408,7 +2482,6 @@ export default function CustomerPortal({
               <div className="avatar" style={{ width: 32, height: 32, fontSize: 12, borderRadius: '50%', background: 'var(--primary)', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600 }}>{initials}</div>
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontWeight: 600, fontSize: 13, color: '#FFFFFF', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{customerName}</div>
-                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', marginTop: 1 }}>VIP Member</div>
               </div>
             </div>
             <div style={{ marginTop: 8, fontSize: 11, color: 'rgba(255,255,255,0.6)', display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -2577,12 +2650,22 @@ export default function CustomerPortal({
                     <UploadCloud style={{ width: 14, height: 14 }} /> Upload Photos
                   </button>
                   )}
-                  {activeOnly.length > 0 && isCustomizable(activeOnly[0]) && activeOnly[0].customizationStatus !== 'completed' && (
-                    <button className="btn" style={{ background: 'var(--primary)', color: '#FFFFFF', borderRadius: 12, padding: '8px 16px', fontSize: 13, border: 'none', display: 'flex', alignItems: 'center', gap: 6 }}
-                      onClick={() => loadSkuTemplate(activeOnly[0])}>
-                      <Palette style={{ width: 14, height: 14 }} /> Continue Design
-                    </button>
-                  )}
+                  {/* Only a shortcut when there's exactly one candidate - activeOnly[0]
+                      used to be opened unconditionally, so with more than one
+                      customizable order this could open the wrong product entirely
+                      (e.g. Butterfly Box vs. a Gift Wrap line item sorted first).
+                      With 2+ candidates, "Upload Photos" above already routes to the
+                      selection screen where the customer picks the right one. */}
+                  {(() => {
+                    const pendingCustomizable = activeOnly.filter(o => isCustomizable(o) && o.customizationStatus !== 'completed');
+                    if (pendingCustomizable.length !== 1) return null;
+                    return (
+                      <button className="btn" style={{ background: 'var(--primary)', color: '#FFFFFF', borderRadius: 12, padding: '8px 16px', fontSize: 13, border: 'none', display: 'flex', alignItems: 'center', gap: 6 }}
+                        onClick={() => loadSkuTemplate(pendingCustomizable[0])}>
+                        <Palette style={{ width: 14, height: 14 }} /> Continue Design
+                      </button>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
@@ -2726,7 +2809,7 @@ export default function CustomerPortal({
                                   style={{ borderRadius: 8, background: '#171C62', color: '#fff', border: 'none', fontWeight: 700 }} 
                                   onClick={() => { setActiveOrder(order); setWizardStep(2); setForceDashboard(false); setMobileNavOpen(false); }}
                                 >
-                                  <UploadCloud style={{ width: 14, height: 14 }} /> Upload Photos
+                                  <UploadCloud style={{ width: 14, height: 14 }} /> Upload {getRequiredPhotoCount(order)} Photo{getRequiredPhotoCount(order) === 1 ? '' : 's'}
                                 </button>
                               )}
                             </>
@@ -2773,7 +2856,6 @@ export default function CustomerPortal({
                     </div>
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-primary)' }}>{customerName}</div>
-                      <span className="badge badge-success" style={{ fontSize: 9, marginTop: 2, background: 'rgba(34, 197, 94, 0.1)', color: '#22C55E' }}>VIP Member</span>
                     </div>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12, borderTop: '1px solid var(--border-color)', paddingTop: 12 }}>
@@ -3012,7 +3094,7 @@ export default function CustomerPortal({
                                   style={{ borderRadius: 8, background: '#171C62', color: '#fff', border: 'none', fontWeight: 700 }}
                                   onClick={() => { setActiveOrder(order); setWizardStep(2); setForceDashboard(false); setMobileNavOpen(false); }}
                                 >
-                                  <i className="bi bi-cloud-upload" /> Upload Photos
+                                  <i className="bi bi-cloud-upload" /> Upload {getRequiredPhotoCount(order)} Photo{getRequiredPhotoCount(order) === 1 ? '' : 's'}
                                 </button>
                               )}
                             </>
@@ -3178,7 +3260,7 @@ export default function CustomerPortal({
                     const pipeline = [
                       { title: 'Order Synced', log: orderPlacedLog || { time: activeOrder.date } },
                       { title: 'Photos Uploaded', log: photosUploadedLog },
-                      { title: 'Admin Approved', log: approvedLog },
+                      { title: 'In Production', log: approvedLog },
                       { title: 'Sent to Printer', log: printingLog },
                       { title: 'Fulfillment Completed', log: deliveredLog ? { time: 'Completed' } : null }
                     ];
@@ -3313,42 +3395,11 @@ export default function CustomerPortal({
                     <h2 className="wiz-section-title">Upload Your Photos</h2>
                     <p className="wiz-section-sub">Drop your photos here — we'll place them beautifully on your product.</p>
 
-                {activeOrder.productType === 'butterfly' && (
-                  <div style={{
-                    background: 'linear-gradient(to right, #eff6ff, #f8fafc)',
-                    border: '1px solid #bfdbfe',
-                    borderRadius: '12px',
-                    padding: '20px',
-                    marginBottom: '24px',
-                    boxShadow: '0 4px 12px rgba(59, 130, 246, 0.05)',
-                    color: '#1e3a8a',
-                    fontSize: '13.5px',
-                    lineHeight: '1.6'
-                  }}>
-                    <h4 style={{ margin: '0 0 12px 0', fontSize: '16px', fontWeight: 900, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <i className="bi bi-gift-fill" style={{ color: '#3b82f6' }}></i>
-                      The Prink's Butterfly Box
-                    </h4>
-                    <p style={{ margin: '0 0 16px 0' }}>
-                      Celebrate your favourite friendship with The Prink's Butterfly Box. Lift the lid and watch 8 flying butterflies take off over a shower of faux flowers, up to 8 of your favourite photos, and a handcrafted bouquet of wishes right at the heart. A triple-layer explosion gift box, handmade to hold your memories — and open a smile.
-                    </p>
-                    
-                    <strong style={{ display: 'block', marginBottom: '8px' }}>Product Details:</strong>
-                    <ul style={{ margin: '0 0 16px 0', paddingLeft: '24px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      <li><strong>8 Flying Butterfly Surprise</strong> (Reusable)</li>
-                      <li>Personalize upto <strong>8 photos</strong></li>
-                      <li>A <strong>triple layer Explosion Gift Box</strong> with Silver knob</li>
-                      <li>Faux Flowers Shower</li>
-                      <li>Handcrafted Bouquet of wishes in the center</li>
-                      <li>Box dimension - 15 cm x 15 cm x 17 cm</li>
-                      <li>Chocolates (Available as Add on)</li>
-                    </ul>
-                    
-                    <div style={{ background: '#dbeafe', padding: '12px', borderRadius: '8px', fontSize: '12px' }}>
-                      <strong>Note:</strong> You can add your personal gifts such as ring, watch or mobiles, which makes it even more special (after purchase).
-                    </div>
-                  </div>
-                )}
+                {/* The Prink's Butterfly Box product description card that used to
+                    render here was removed per client feedback: it added an extra
+                    read before the customer could get to uploading photos, and the
+                    functional "upload exactly N photos" instruction banner below
+                    already tells them what they need to know. */}
 
                 {/* Upload method pills */}
                 <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
@@ -3365,23 +3416,48 @@ export default function CustomerPortal({
                   ))}
                 </div>
 
-                {/* Drop zone */}
-                <div
-                  className={`wiz-upload-zone${dragOver ? ' dragover' : ''}`}
-                  onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-                  onDragLeave={() => setDragOver(false)}
-                  onDrop={e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files) addImages(e.dataTransfer.files); }}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                                    <div className="wiz-upload-zone-content">
-                    <i className="bi bi-cloud-arrow-up-fill wiz-upload-icon" />
-                    <div style={{ fontWeight: 900, fontSize: 24, color: 'var(--primary)', marginBottom: 8 }}>Drop your best photos here</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.6 }}>
-                    Supports <strong>JPG, PNG, HEIC, WEBP</strong>&nbsp;·&nbsp;Max 20MB per photo<br />
-                    Minimum <strong>300 DPI</strong> recommended for best print quality
-                  </div>
-                  </div>
-                </div>
+                {/* Drop zone - once enough photos are in, this switches from
+                    "please drop photos" (which used to keep showing even
+                    after the requirement was already met, per client
+                    feedback) to a clear success state. Still droppable/
+                    clickable underneath in case the customer wants to add
+                    more or swap one out. */}
+                {(() => {
+                  const requiredCount = getRequiredPhotoCount(activeOrder);
+                  const isSatisfied = requiredCount > 0 && images.length >= requiredCount;
+                  return (
+                    <div
+                      className={`wiz-upload-zone${dragOver ? ' dragover' : ''}${isSatisfied ? ' satisfied' : ''}`}
+                      onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+                      onDragLeave={() => setDragOver(false)}
+                      onDrop={e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files) addImages(e.dataTransfer.files); }}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <div className="wiz-upload-zone-content">
+                        {isSatisfied ? (
+                          <>
+                            <i className="bi bi-check-circle-fill wiz-upload-icon" style={{ color: 'var(--success)' }} />
+                            <div style={{ fontWeight: 900, fontSize: 24, color: 'var(--success)', marginBottom: 8 }}>
+                              Photos Uploaded Successfully!
+                            </div>
+                            <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                              All {requiredCount} photo{requiredCount === 1 ? '' : 's'} are in - use Submit below to continue, or click here to add/replace a photo.
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <i className="bi bi-cloud-arrow-up-fill wiz-upload-icon" />
+                            <div style={{ fontWeight: 900, fontSize: 24, color: 'var(--primary)', marginBottom: 8 }}>Drop your best photos here</div>
+                            <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.6 }}>
+                              Supports <strong>JPG, PNG, HEIC, WEBP</strong>&nbsp;·&nbsp;Max 20MB per photo<br />
+                              Minimum <strong>300 DPI</strong> recommended for best print quality
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Thumbnail strip & Live Preview */}
                 {images.length > 0 && (
@@ -3457,7 +3533,7 @@ export default function CustomerPortal({
                           onDrop={(e) => handleDropCard(e, idx)}
                           title="Drag to rearrange sequence"
                         >
-                          <img src={img.src} alt={img.name} />
+                          <img src={img.src} alt={img.name} onClick={() => setReviewPhotoIdx(idx)} />
                           {uploadProgress[img.id] !== undefined && uploadProgress[img.id] < 100 && (
                             <div className="wiz-upload-progress" style={{ position: 'absolute', bottom: 0, left: 0, right: 0, borderRadius: 0, margin: 0 }}>
                               <div className="wiz-upload-progress-fill" style={{ width: `${uploadProgress[img.id]}%` }} />
@@ -3466,6 +3542,26 @@ export default function CustomerPortal({
                           <button className="wiz-thumb-remove" onClick={e => { e.stopPropagation(); removeImage(img.id); }}>
                             <i className="bi bi-x" />
                           </button>
+                          {images.length > 1 && (
+                            <div className="wiz-thumb-move-row" onClick={e => e.stopPropagation()}>
+                              <button
+                                className="wiz-thumb-move"
+                                disabled={idx === 0}
+                                title="Move earlier in sequence"
+                                onClick={() => moveImage(idx, -1)}
+                              >
+                                <i className="bi bi-chevron-left" />
+                              </button>
+                              <button
+                                className="wiz-thumb-move"
+                                disabled={idx === images.length - 1}
+                                title="Move later in sequence"
+                                onClick={() => moveImage(idx, 1)}
+                              >
+                                <i className="bi bi-chevron-right" />
+                              </button>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -3543,6 +3639,7 @@ export default function CustomerPortal({
                         </svg>
                         <div style={{ position: 'absolute', top: '75px', width: '64px', height: '85px', border: '1px dashed rgba(23,28,98,0.2)', overflow: 'hidden', background: '#fff', borderRadius: 2 }}>
                           <img src={livePreviewPhoto || images[0]?.src} alt="preview"
+                            ref={measureCropContainer}
                             style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, cursor: 'move', transition: isDraggingPhoto ? 'none' : 'transform 0.15s ease-out', width: '100%', height: '100%', objectFit: 'cover', userSelect: 'none', touchAction: 'none' }}
                             onMouseDown={e => { e.preventDefault(); setIsDraggingPhoto(true); dragStartPos.current = { x: e.clientX, y: e.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
                             onTouchStart={e => { setIsDraggingPhoto(true); const t = e.touches[0]; dragStartPos.current = { x: t.clientX, y: t.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
@@ -3554,8 +3651,13 @@ export default function CustomerPortal({
                     {activeOrder.productType === 'mug' && (
                       <div style={{ position: 'relative', width: '220px', height: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <div style={{ width: '130px', height: '140px', background: '#ffffff', borderRadius: '8px 8px 16px 16px', boxShadow: 'inset -20px 0 20px rgba(0,0,0,0.05), 0 8px 32px rgba(0,0,0,0.12)', border: '1px solid #eee', overflow: 'hidden', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <div style={{ width: '100px', height: '110px', overflow: 'hidden', borderRadius: 4, position: 'relative', border: '1px dashed #ddd' }}>
+                          {/* Window sized to the mug's real 200x85mm wrap area
+                              (ratio ~2.35) - a wide band, not a near-square
+                              window, matching what's actually printed on the
+                              wrap. See server/config/printTemplates.js. */}
+                          <div style={{ width: '126px', height: '54px', overflow: 'hidden', borderRadius: 4, position: 'relative', border: '1px dashed #ddd' }}>
                             <img src={livePreviewPhoto || images[0]?.src} alt="preview"
+                              ref={measureCropContainer}
                               style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, cursor: 'move', transition: isDraggingPhoto ? 'none' : 'transform 0.15s ease-out', width: '100%', height: '100%', objectFit: 'cover', userSelect: 'none', touchAction: 'none' }}
                               onMouseDown={e => { e.preventDefault(); setIsDraggingPhoto(true); dragStartPos.current = { x: e.clientX, y: e.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
                               onTouchStart={e => { setIsDraggingPhoto(true); const t = e.touches[0]; dragStartPos.current = { x: t.clientX, y: t.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
@@ -3575,6 +3677,7 @@ export default function CustomerPortal({
                         </div>
                         <div style={{ width: '100%', height: '100%', borderRadius: '18px', overflow: 'hidden', position: 'relative', background: '#fff' }}>
                           <img src={livePreviewPhoto || images[0]?.src} alt="preview"
+                            ref={measureCropContainer}
                             style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, cursor: 'move', transition: isDraggingPhoto ? 'none' : 'transform 0.15s ease-out', width: '100%', height: '100%', objectFit: 'cover', userSelect: 'none', touchAction: 'none' }}
                             onMouseDown={e => { e.preventDefault(); setIsDraggingPhoto(true); dragStartPos.current = { x: e.clientX, y: e.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
                             onTouchStart={e => { setIsDraggingPhoto(true); const t = e.touches[0]; dragStartPos.current = { x: t.clientX, y: t.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
@@ -3585,9 +3688,15 @@ export default function CustomerPortal({
                     {/* FRAME */}
                     {activeOrder.productType === 'frame' && (
                       <div style={{ position: 'relative', width: '220px', height: '180px', background: '#3e2723', padding: '16px', borderRadius: '4px', boxShadow: '0 10px 36px rgba(0,0,0,0.25)', border: '1px solid #271511', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <div style={{ width: '100%', height: '100%', background: '#f5f5f5', padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'inset 0 2px 5px rgba(0,0,0,0.1)' }}>
-                          <div style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative', background: '#fff', boxShadow: 'inset 0 0 4px rgba(0,0,0,0.2)' }}>
+                        <div style={{ width: '100%', height: '100%', background: '#f5f5f5', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'inset 0 2px 5px rgba(0,0,0,0.1)' }}>
+                          {/* Window sized to the frame's real 203.2x254mm print area
+                              (ratio ~0.8), not the mat's own landscape shape - a
+                              portrait photo with a wide mat border either side is
+                              a normal picture-frame look, and it's what the print
+                              file actually is. See server/config/printTemplates.js. */}
+                          <div style={{ width: '99px', height: '124px', overflow: 'hidden', position: 'relative', background: '#fff', boxShadow: 'inset 0 0 4px rgba(0,0,0,0.2)' }}>
                             <img src={livePreviewPhoto || images[0]?.src} alt="preview"
+                              ref={measureCropContainer}
                               style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, cursor: 'move', transition: isDraggingPhoto ? 'none' : 'transform 0.15s ease-out', width: '100%', height: '100%', objectFit: 'cover', userSelect: 'none', touchAction: 'none' }}
                               onMouseDown={e => { e.preventDefault(); setIsDraggingPhoto(true); dragStartPos.current = { x: e.clientX, y: e.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
                               onTouchStart={e => { setIsDraggingPhoto(true); const t = e.touches[0]; dragStartPos.current = { x: t.clientX, y: t.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
@@ -3601,6 +3710,7 @@ export default function CustomerPortal({
                       <div style={{ position: 'relative', width: '200px', height: '200px', background: '#fafafa', borderRadius: '36px', boxShadow: '0 10px 28px rgba(0,0,0,0.10), inset 0 0 20px rgba(0,0,0,0.06)', overflow: 'hidden', padding: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #f0f0f0' }}>
                         <div style={{ width: '100%', height: '100%', borderRadius: '24px', overflow: 'hidden', position: 'relative', border: '1px dashed #eee' }}>
                           <img src={livePreviewPhoto || images[0]?.src} alt="preview"
+                            ref={measureCropContainer}
                             style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, cursor: 'move', transition: isDraggingPhoto ? 'none' : 'transform 0.15s ease-out', width: '100%', height: '100%', objectFit: 'cover', userSelect: 'none', touchAction: 'none' }}
                             onMouseDown={e => { e.preventDefault(); setIsDraggingPhoto(true); dragStartPos.current = { x: e.clientX, y: e.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
                             onTouchStart={e => { setIsDraggingPhoto(true); const t = e.touches[0]; dragStartPos.current = { x: t.clientX, y: t.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
@@ -3617,6 +3727,7 @@ export default function CustomerPortal({
                         <div style={{ width: '120px', height: '120px', borderRadius: '50%', border: '6px solid rgba(255,255,255,0.7)', background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(2px)', boxShadow: '0 8px 24px rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
                           <div style={{ width: '100px', height: '100px', borderRadius: '50%', overflow: 'hidden', position: 'relative' }}>
                             <img src={livePreviewPhoto || images[0]?.src} alt="preview"
+                              ref={measureCropContainer}
                               style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, cursor: 'move', transition: isDraggingPhoto ? 'none' : 'transform 0.15s ease-out', width: '100%', height: '100%', objectFit: 'cover', userSelect: 'none', touchAction: 'none' }}
                               onMouseDown={e => { e.preventDefault(); setIsDraggingPhoto(true); dragStartPos.current = { x: e.clientX, y: e.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
                               onTouchStart={e => { setIsDraggingPhoto(true); const t = e.touches[0]; dragStartPos.current = { x: t.clientX, y: t.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
@@ -3634,6 +3745,7 @@ export default function CustomerPortal({
                         <div style={{ flex: 1, background: '#fff', padding: '10px' }}>
                           <div style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative', border: '1px dashed #ccc', borderRadius: 2 }}>
                             <img src={livePreviewPhoto || images[0]?.src} alt="preview"
+                              ref={measureCropContainer}
                               style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, cursor: 'move', transition: isDraggingPhoto ? 'none' : 'transform 0.15s ease-out', width: '100%', height: '100%', objectFit: 'cover', userSelect: 'none', touchAction: 'none' }}
                               onMouseDown={e => { e.preventDefault(); setIsDraggingPhoto(true); dragStartPos.current = { x: e.clientX, y: e.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
                               onTouchStart={e => { setIsDraggingPhoto(true); const t = e.touches[0]; dragStartPos.current = { x: t.clientX, y: t.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
@@ -3654,12 +3766,20 @@ export default function CustomerPortal({
                     )}
                     {/* CANVAS / CALENDAR / GENERIC FALLBACK */}
                     {activeOrder.productType !== 'tshirt' && activeOrder.productType !== 'mug' && activeOrder.productType !== 'mobilecase' && activeOrder.productType !== 'frame' && activeOrder.productType !== 'pillow' && activeOrder.productType !== 'keychain' && activeOrder.productType !== 'photobook' && !isButterfly(activeOrder) && !isMagazine(activeOrder) && (!isButterfly(activeOrder) && !isMagazine(activeOrder)) && (
-                      <div style={{ position: 'relative', width: '240px', height: '180px', borderRadius: 8, boxShadow: '0 8px 32px rgba(0,0,0,0.14), inset 0 0 0 4px #eee', overflow: 'hidden', background: '#fff' }}>
-                        <img src={livePreviewPhoto || images[0]?.src} alt="preview"
-                          style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, cursor: 'move', transition: isDraggingPhoto ? 'none' : 'transform 0.15s ease-out', width: '100%', height: '100%', objectFit: 'cover', userSelect: 'none', touchAction: 'none' }}
-                          onMouseDown={e => { e.preventDefault(); setIsDraggingPhoto(true); dragStartPos.current = { x: e.clientX, y: e.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
-                          onTouchStart={e => { setIsDraggingPhoto(true); const t = e.touches[0]; dragStartPos.current = { x: t.clientX, y: t.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
-                        />
+                      <div style={{ position: 'relative', width: '240px', height: '180px', padding: 12, borderRadius: 8, boxShadow: '0 8px 32px rgba(0,0,0,0.14), inset 0 0 0 4px #eee', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {/* Window sized to the canvas fallback template's real
+                            304.8x406.4mm print area (ratio 0.75) - also what
+                            pillow/keychain/photobook fall back to today since
+                            they have no dedicated template entry yet. See
+                            server/config/printTemplates.js. */}
+                        <div style={{ width: '117px', height: '156px', overflow: 'hidden', position: 'relative' }}>
+                          <img src={livePreviewPhoto || images[0]?.src} alt="preview"
+                            ref={measureCropContainer}
+                            style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, cursor: 'move', transition: isDraggingPhoto ? 'none' : 'transform 0.15s ease-out', width: '100%', height: '100%', objectFit: 'cover', userSelect: 'none', touchAction: 'none' }}
+                            onMouseDown={e => { e.preventDefault(); setIsDraggingPhoto(true); dragStartPos.current = { x: e.clientX, y: e.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
+                            onTouchStart={e => { setIsDraggingPhoto(true); const t = e.touches[0]; dragStartPos.current = { x: t.clientX, y: t.clientY }; photoOffsetStart.current = { x: photoOffsetX, y: photoOffsetY }; }}
+                          />
+                        </div>
                       </div>
                     )}
                     {/* Drag hint */}
@@ -3758,7 +3878,7 @@ export default function CustomerPortal({
             {wizardStep === 4 && activeOrder && (
               <div className={`wizard-panel${wizardDir === 'back' ? ' reverse' : ''}`}>
                 <h2 className="wiz-section-title">Review Your Design</h2>
-                <p className="wiz-section-sub">Look good? Submit it to our design team for review and printing.</p>
+                <p className="wiz-section-sub">Look good? Submit it and we'll get your order into printing.</p>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 300px', gap: 24, alignItems: 'start' }} className="responsive-two-col">
                   {/* Left: Preview */}
@@ -3790,11 +3910,14 @@ export default function CustomerPortal({
                               );
                             }
                             if (pType === 'mug') {
+                              // Same 126x54 -> 108x46 scale-down as the editor
+                              // window (both ratio ~2.35, matching the real
+                              // wrap area).
                               return (
                                 <div style={{ position: 'relative', width: '180px', height: '150px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                   <div style={{ width: '110px', height: '120px', background: '#ffffff', borderRadius: '8px 8px 14px 14px', boxShadow: 'inset -15px 0 15px rgba(0,0,0,0.04), 0 6px 24px rgba(0,0,0,0.1)', border: '1px solid #eee', overflow: 'hidden', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                    <div style={{ width: '85px', height: '95px', overflow: 'hidden', borderRadius: 4, position: 'relative', border: '1px dashed #eee' }}>
-                                      <img src={imgSrc} alt="mug layout" style={{ transform: `translate(${photoOffsetX * (85/100)}px,${photoOffsetY * (95/110)}px) scale(${photoScale}) rotate(${photoRotation}deg)`, width: '100%', height: '100%', objectFit: 'cover' }} />
+                                    <div style={{ width: '108px', height: '46px', overflow: 'hidden', borderRadius: 4, position: 'relative', border: '1px dashed #eee' }}>
+                                      <img src={imgSrc} alt="mug layout" style={{ transform: `translate(${photoOffsetX * (108/126)}px,${photoOffsetY * (46/54)}px) scale(${photoScale}) rotate(${photoRotation}deg)`, width: '100%', height: '100%', objectFit: 'cover' }} />
                                     </div>
                                   </div>
                                   <div style={{ position: 'absolute', right: '40px', top: '35px', width: '25px', height: '70px', border: '10px solid #ffffff', borderLeft: 'none', borderRadius: '0 30px 30px 0', boxShadow: '2px 4px 8px rgba(0,0,0,0.06)' }} />
@@ -3816,20 +3939,28 @@ export default function CustomerPortal({
                               );
                             }
                             if (pType === 'frame') {
+                              // Same 99x124 -> 85x106 scale-down as the editor
+                              // window (both ratio ~0.8, matching the real
+                              // print area), so this conversion factor is a
+                              // pure scale, not a shape change.
                               return (
                                 <div style={{ position: 'relative', width: '180px', height: '150px', background: '#3e2723', padding: '12px', borderRadius: '4px', boxShadow: '0 8px 28px rgba(0,0,0,0.2)', border: '1px solid #271511', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                  <div style={{ width: '100%', height: '100%', background: '#f5f5f5', padding: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'inset 0 1.5px 4px rgba(0,0,0,0.1)' }}>
-                                    <div style={{ width: '100%', height: '100%', overflow: 'hidden', position: 'relative', background: '#fff', boxShadow: 'inset 0 0 3px rgba(0,0,0,0.15)' }}>
-                                      <img src={imgSrc} alt="frame layout" style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, width: '100%', height: '100%', objectFit: 'cover' }} />
+                                  <div style={{ width: '100%', height: '100%', background: '#f5f5f5', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'inset 0 1.5px 4px rgba(0,0,0,0.1)' }}>
+                                    <div style={{ width: '85px', height: '106px', overflow: 'hidden', position: 'relative', background: '#fff', boxShadow: 'inset 0 0 3px rgba(0,0,0,0.15)' }}>
+                                      <img src={imgSrc} alt="frame layout" style={{ transform: `translate(${photoOffsetX * (85/99)}px,${photoOffsetY * (106/124)}px) scale(${photoScale}) rotate(${photoRotation}deg)`, width: '100%', height: '100%', objectFit: 'cover' }} />
                                     </div>
                                   </div>
                                 </div>
                               );
                             }
-                            // Default canvas fallback
+                            // Default canvas fallback - 117x156 window, same
+                            // ratio (0.75) and coincidentally the same size as
+                            // the editor's, so no scale conversion is needed.
                             return (
-                              <div style={{ position: 'relative', width: '180px', height: '180px', padding: '12px', background: '#ffffff', border: '1px solid var(--border-color)', borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                                <img src={imgSrc} alt="canvas layout" style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, width: '100%', height: '100%', objectFit: 'cover' }} />
+                              <div style={{ position: 'relative', width: '180px', height: '180px', padding: '12px', background: '#ffffff', border: '1px solid var(--border-color)', borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <div style={{ width: '117px', height: '156px', overflow: 'hidden', position: 'relative' }}>
+                                  <img src={imgSrc} alt="canvas layout" style={{ transform: `translate(${photoOffsetX}px,${photoOffsetY}px) scale(${photoScale}) rotate(${photoRotation}deg)`, width: '100%', height: '100%', objectFit: 'cover' }} />
+                                </div>
                               </div>
                             );
                           })()
@@ -3838,14 +3969,17 @@ export default function CustomerPortal({
                         <i className={`bi ${productIcon(activeOrder.productType)}`} style={{ fontSize: 60, color: 'var(--accent)', opacity: 0.5 }} />
                       )}
                     </div>
-                    {/* Uploaded photos row */}
+                    {/* Uploaded photos row - the last chance to check each
+                        photo (not just the one product mockup above) before
+                        submitting, so every photo opens the same review
+                        lightbox the upload step uses. */}
                     {images.length > 0 && (
                       <div>
                         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 10 }}>Uploaded Photos ({images.length})</div>
                         <div className="wiz-thumb-strip">
-                          {images.map(img => (
+                          {images.map((img, idx) => (
                             <div key={img.id} className="wiz-thumb">
-                              <img src={img.src} alt={img.name} />
+                              <img src={img.src} alt={img.name} onClick={() => setReviewPhotoIdx(idx)} />
                             </div>
                           ))}
                         </div>
@@ -3877,7 +4011,7 @@ export default function CustomerPortal({
                     {/* Confidence chip */}
                     <div style={{ marginTop: 16, background: 'rgba(15,190,136,0.08)', border: '1px solid rgba(15,190,136,0.2)', borderRadius: 10, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
                       <i className="bi bi-shield-check" style={{ color: 'var(--success)', fontSize: 18 }} />
-                      <span style={{ color: '#0a8a62', fontWeight: 600 }}>Your design will be reviewed by our team within 24 hours before printing.</span>
+                      <span style={{ color: '#0a8a62', fontWeight: 600 }}>Once you submit, your photos go straight into our printing workflow.</span>
                     </div>
                   </div>
                 </div>
@@ -3928,9 +4062,9 @@ export default function CustomerPortal({
                 <div className="wiz-success-ring">
                   <i className="bi bi-check-lg" />
                 </div>
-                <h2 style={{ fontSize: 32, fontWeight: 900, color: 'var(--primary)', margin: '0 0 10px' }}>Design Submitted! 🎉</h2>
+                <h2 style={{ fontSize: 32, fontWeight: 900, color: 'var(--primary)', margin: '0 0 10px' }}>Photos Submitted Successfully! 🎉</h2>
                 <p style={{ fontSize: 16, color: 'var(--text-secondary)', maxWidth: 480, lineHeight: 1.7, margin: '0 0 32px' }}>
-                  Your design has been sent to our creative team for review. We'll notify you once it's approved and sent to print.
+                  Your personalization details have been received and your order is now being processed for printing. We'll keep you posted with WhatsApp updates.
                 </p>
                 <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', justifyContent: 'center' }}>
                   <button className="wiz-btn-next" onClick={() => { navTo('tracking'); }}>
@@ -4323,12 +4457,12 @@ export default function CustomerPortal({
                 }}>
                   🎉
                 </div>
-                <h2 style={{ fontSize: 26, fontWeight: 800, margin: '0 0 8px', color: 'var(--primary)' }}>Design Submitted!</h2>
+                <h2 style={{ fontSize: 26, fontWeight: 800, margin: '0 0 8px', color: 'var(--primary)' }}>Photos Submitted Successfully! 🎉</h2>
                 <p style={{ fontSize: 14, color: 'var(--text-secondary)', margin: '0 0 6px' }}>
-                  Your customization for <strong>{submittedOrderId || activeOrder?.product}</strong> has been submitted.
+                  Your personalization details for <strong>{submittedOrderId || activeOrder?.product}</strong> have been received and your order is now being processed for printing.
                 </p>
                 <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '0 0 24px' }}>
-                  Our design team will review and approve within 24 hours. You'll receive a WhatsApp notification once approved.
+                  Your photos are now with our print team. You'll receive a WhatsApp notification as your order moves through printing and dispatch.
                 </p>
                 {/* Status chips */}
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 24 }}>
@@ -4336,7 +4470,7 @@ export default function CustomerPortal({
                     ✓ Design Saved
                   </span>
                   <span className="badge badge-secondary">
-                    📋 Under Admin Review
+                    📋 Order Under Process
                   </span>
                   <span className="badge badge-secondary">
                     📱 WhatsApp Alert Queued
@@ -4388,8 +4522,8 @@ export default function CustomerPortal({
                   const wsLabels: Record<string, { label: string; color: string; bg: string }> = {
                     order_received:          { label: '🛒 Order Received',               color: '#0284c7', bg: '#e0f2fe' },
                     personalization_pending: { label: '📷 Personalization Pending',      color: '#d97706', bg: '#fef3c7' },
-                    photo_uploaded:          { label: '📷 Personalization Submitted',    color: '#0369a1', bg: '#e0f2fe' },
-                    approved:                { label: '✅ Admin Approved',               color: '#15803d', bg: '#dcfce7' },
+                    photo_uploaded:          { label: '🖨️ Printing',                    color: '#b45309', bg: '#fef3c7' },
+                    approved:                { label: '🖨️ Printing',                    color: '#b45309', bg: '#fef3c7' },
                     rejected:                { label: '❌ Rejected — Re-upload Required',color: '#dc2626', bg: '#fee2e2' },
                     sent_to_printer:         { label: '🖨️ Printing',                    color: '#1d4ed8', bg: '#dbeafe' },
                     printer_processing:      { label: '⚙️ Printing',                    color: '#b45309', bg: '#fef3c7' },
@@ -4654,68 +4788,6 @@ export default function CustomerPortal({
         )}
 
         {/* ==================================================================
-            SUBVIEW: PROFILE
-            ================================================================== */}
-        {activeSubView === 'profile' && (
-          <div className="flex flex-col gap-6">
-            <div>
-              <button className="btn btn-outline btn-sm mb-2" onClick={() => navTo('upload')}>
-                <i className="bi bi-arrow-left" /> My Orders
-              </button>
-              <h1 className="page-heading">My Profile</h1>
-            </div>
-
-            <div className="card" style={{ padding: 28, borderRadius: 24 }}>
-              {/* Profile header */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 28, paddingBottom: 24, borderBottom: '1px solid var(--border-color)', flexWrap: 'wrap' }}>
-                <div className="avatar" style={{ width: 80, height: 80, fontSize: 28 }}>{initials}</div>
-                <div>
-                  <h2 style={{ margin: 0, color: 'var(--primary)', fontSize: 22, fontWeight: 800 }}>{customerName}</h2>
-                  <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4 }}>VIP Premium Member · Since Jan 2026</div>
-                  <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-                    <span className="badge badge-success">Active Account</span>
-                    <span className="badge badge-accent">750 Points</span>
-                    <span className="badge badge-primary">Premium Elite</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Fields */}
-              <div className="grid grid-2 gap-4">
-                <div>
-                  <label className="label">Phone Number</label>
-                  <input type="text" className="input" readOnly value={allOrders[0]?.phone || '+91 98765 43210'} />
-                </div>
-                <div>
-                  <label className="label">Membership Tier</label>
-                  <input type="text" className="input" readOnly value="Premium Elite Gold" />
-                </div>
-                <div>
-                  <label className="label">Loyalty Points</label>
-                  <input type="text" className="input" readOnly value="750 Points (Redeemable)" />
-                </div>
-                <div>
-                  <label className="label">Total Orders</label>
-                  <input type="text" className="input" readOnly value={`${allOrders.length} Orders Placed`} />
-                </div>
-              </div>
-
-              {/* Loyalty bar */}
-              <div style={{ marginTop: 24, padding: '16px 20px', background: 'var(--primary-soft)', borderRadius: 14, border: '1px solid rgba(23,28,98,0.1)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--primary)' }}>Loyalty Progress</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>750 / 1000 points to Platinum</div>
-                </div>
-                <div className="progress-bar">
-                  <div className="progress-bar-fill" style={{ width: '75%' }} />
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 6 }}>250 more points to unlock Platinum tier with free shipping!</div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ==================================================================
             SUBVIEW: SUPPORT
             ================================================================== */}
         {activeSubView === 'support' && (
@@ -4800,10 +4872,72 @@ export default function CustomerPortal({
       </main>
 
       {/* =======================================================================
+          PHOTO REVIEW LIGHTBOX
+          Lets the customer check any uploaded photo at full size, with
+          prev/next navigation across all of them. Works identically no
+          matter how many photos the product needs - previously, only the
+          single auto-selected "live preview" photo was ever shown larger
+          than a small thumbnail.
+          ======================================================================= */}
+      {reviewPhotoIdx !== null && images[reviewPhotoIdx] && (
+        <div className="modal-overlay active" onClick={() => setReviewPhotoIdx(null)}>
+          <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 560 }}>
+            <div className="flex align-center justify-between" style={{ marginBottom: '1rem' }}>
+              <h2 style={{ fontWeight: 700, color: 'var(--primary)', margin: 0, fontSize: '1.1rem' }}>
+                Photo {reviewPhotoIdx + 1} of {images.length}
+              </h2>
+              <button className="btn btn-outline btn-sm" onClick={() => setReviewPhotoIdx(null)}><i className="bi bi-x-lg" /></button>
+            </div>
+
+            <div style={{ position: 'relative', borderRadius: 12, overflow: 'hidden', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 320 }}>
+              <img
+                src={images[reviewPhotoIdx].src}
+                alt={images[reviewPhotoIdx].name}
+                style={{ maxWidth: '100%', maxHeight: '70vh', display: 'block', margin: 'auto', objectFit: 'contain' }}
+              />
+              {images.length > 1 && (
+                <>
+                  <button
+                    className="btn btn-outline btn-sm"
+                    style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', borderRadius: '50%', width: 36, height: 36, padding: 0 }}
+                    disabled={reviewPhotoIdx === 0}
+                    onClick={() => setReviewPhotoIdx(i => (i === null ? i : i - 1))}
+                  >
+                    <i className="bi bi-chevron-left" />
+                  </button>
+                  <button
+                    className="btn btn-outline btn-sm"
+                    style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', borderRadius: '50%', width: 36, height: 36, padding: 0 }}
+                    disabled={reviewPhotoIdx === images.length - 1}
+                    onClick={() => setReviewPhotoIdx(i => (i === null ? i : i + 1))}
+                  >
+                    <i className="bi bi-chevron-right" />
+                  </button>
+                </>
+              )}
+            </div>
+
+            <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center' }}>
+              {images[reviewPhotoIdx].name}
+            </div>
+
+            <div className="flex gap-2" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
+              <button className="btn btn-outline" onClick={() => { removeImage(images[reviewPhotoIdx]!.id); setReviewPhotoIdx(null); }}>
+                <i className="bi bi-trash" /> Remove This Photo
+              </button>
+              <button className="btn btn-primary" onClick={() => setReviewPhotoIdx(null)}>
+                <i className="bi bi-check-lg" /> Looks Good
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =======================================================================
           CROP MODAL
           ======================================================================= */}
       {cropOpen && cropTarget && (
-        <div className="modal-overlay" onClick={() => setCropOpen(false)}>
+        <div className="modal-overlay active" onClick={() => setCropOpen(false)}>
           <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
             <div className="flex align-center justify-between" style={{ marginBottom: '1rem' }}>
               <h2 style={{ fontWeight: 700, color: 'var(--primary)', margin: 0, fontSize: '1.1rem' }}>Crop Image</h2>
@@ -4850,7 +4984,7 @@ export default function CustomerPortal({
           ORDER CONFIRMATION MODAL
           ======================================================================= */}
       {confirmOpen && (
-        <div className="modal-overlay" onClick={() => { if (!placingOrder) setConfirmOpen(false); }}>
+        <div className="modal-overlay active" onClick={() => { if (!placingOrder) setConfirmOpen(false); }}>
           <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
             <div className="flex align-center justify-between" style={{ marginBottom: '1rem' }}>
               <h2 style={{ fontWeight: 700, color: 'var(--primary)', margin: 0, fontSize: '1.1rem' }}>Confirm Your Order</h2>
@@ -4914,7 +5048,7 @@ export default function CustomerPortal({
       )}
       {/* Optional Customer Login Modal */}
       {showLoginModal && (
-        <div className="modal-overlay" onClick={() => setShowLoginModal(false)}>
+        <div className="modal-overlay active" onClick={() => setShowLoginModal(false)}>
           <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 440, width: '100%', padding: '24px 28px', borderRadius: 24 }}>
             <div className="flex align-center justify-between" style={{ marginBottom: '1.25rem' }}>
               <h2 style={{ fontWeight: 800, color: 'var(--primary)', margin: 0, fontSize: '1.2rem' }}>Customer Workspace</h2>

@@ -144,6 +144,16 @@ export interface Order {
   trackingNumber?: string;
   trackingUrl?: string;
   trackingCompany?: string;
+  // A Shopify fulfillment webhook detected a shipped/delivered signal not
+  // yet confirmed by an admin - see POST /:id/confirm-delivery-update.
+  pendingDeliveryUpdate?: {
+    status: 'shipped' | 'delivered';
+    trackingNumber?: string;
+    trackingUrl?: string;
+    trackingCompany?: string;
+    shopifyFulfillmentStatus?: string;
+    detectedAt?: string;
+  } | null;
   printStatus?: 'pending' | 'printing' | 'completed';
   submissionTime?: string;
   shippingAddress?: {

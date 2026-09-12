@@ -4,6 +4,7 @@ const ButterflyTemplate = require('../models/ButterflyTemplate');
 const ButterflyTemplateSlot = require('../models/ButterflyTemplateSlot');
 const Order = require('../models/Order');
 const { generateButterflyBoxPdf } = require('../utils/butterflyGenerator');
+const { derivePrintGenerationStatus } = require('../utils/orderStatus');
 const db = require('../db');
 
 /**
@@ -64,14 +65,15 @@ async function allocateButterflyTemplate(claim, images) {
           });
           
           const pdfMeta = { ...file, isButterfly: true };
-          
+          const genStatus = derivePrintGenerationStatus([pdfMeta]);
+
           // Update BOTH orders with the new print file
-          await Order.updateOne({ id: linkedOrderId }, { 
-            $set: { 
-              printFiles: [pdfMeta], 
+          await Order.updateOne({ id: linkedOrderId }, {
+            $set: {
+              printFiles: [pdfMeta],
               pdfUrl: pdfMeta.url,
-              printGenerationStatus: 'completed'
-            } 
+              printGenerationStatus: genStatus
+            }
           });
           
           printFiles = [pdfMeta];
@@ -130,7 +132,11 @@ async function allocateButterflyTemplate(claim, images) {
     templateSide,
     linkedOrderId,
     printFiles,
-    generated
+    generated,
+    // 'completed' | 'partial' | 'failed' | undefined (nothing generated) -
+    // callers should use this, not the plain `generated` boolean, to decide
+    // whether the order is genuinely print-ready.
+    printGenerationStatus: printFiles.length ? derivePrintGenerationStatus(printFiles) : undefined
   };
 }
 

@@ -71,10 +71,18 @@ app.use(cors({
     try {
       const url = new URL(origin);
       if (
-        url.hostname === 'theprink.in' || 
-        url.hostname.endsWith('.theprink.in') || 
+        url.hostname === 'theprink.in' ||
+        url.hostname.endsWith('.theprink.in') ||
         url.hostname.endsWith('.vercel.app')
       ) {
+        return cb(null, true);
+      }
+      // Any localhost/127.0.0.1 port, not just the hardcoded 3000-3003 above -
+      // apps/*/vite.config.ts's dev ports are bumped locally per-machine to
+      // dodge collisions with sibling projects' dev servers (never committed,
+      // so this list can't just be updated to match), so a fixed port list
+      // here silently breaks local login/API calls whenever that happens.
+      if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
         return cb(null, true);
       }
     } catch (e) {}
@@ -360,7 +368,25 @@ process.on('unhandledRejection', reason => {
 // Connect DB & Start Server
 connectDB(); // Ensure DB connects in Vercel serverless environment
 
+// Every test file boots the app via `require('../index.js')` (see
+// tests/*.test.js), so anything here must stay behind this same guard -
+// including the scheduled sync below, which starts an hourly cron (a
+// handle that never lets the process exit) and fires a real Shopify API
+// call 5s after start. Putting that outside this guard made every test
+// run spin up a live cron + network call and hang forever waiting for a
+// process that would never exit on its own.
 if (require.main === module) {
+  // Scheduled Shopify product-catalog sync (hourly, plus once on startup) -
+  // this used to only be wired up in server/app.js, an entry point nothing
+  // actually runs (package.json's main/start/dev scripts all point to this
+  // file), so it silently never ran.
+  connectDB()
+    .then(() => {
+      const { startScheduledSyncJobs } = require('./jobs/sync');
+      startScheduledSyncJobs();
+    })
+    .catch(err => console.error('[STARTUP] Skipping scheduled sync jobs - DB connection failed:', err.message));
+
   app.listen(PORT, () => {
     console.log(`\n======================================================`);
     console.log(`  THE PRINK - Express Backend Server`);

@@ -8,6 +8,7 @@ const { generatePrintPdf, UPLOADS_DIR } = require('../utils/printRenderer');
 const { generateButterflyBoxPdf } = require('../utils/butterflyGenerator');
 const { allocateButterflyTemplate } = require('../services/butterflyAllocation.service');
 const { generateMagazinePdf } = require('../utils/magazineGenerator');
+const { reconcileWorkflowStatus, derivePrintGenerationStatus, deriveDpiStatus } = require('../utils/orderStatus');
 const multer = require('multer');
 const sharp = require('sharp');
 const crypto = require('crypto');
@@ -36,11 +37,41 @@ router.get('/', adminMiddleware, async (req, res) => {
     // Base filter: list all orders for Admin Portal
     const baseFilter = {};
 
+    // Mirrors the client's hasCustomizationBeenReceived() (AdminPortal.tsx)
+    // exactly, so the "Ready (Uploaded)" / "Pending Upload" tabs, their
+    // counts, and the actual rows returned all agree with each other.
+    const READY_WORKFLOW_STATUSES = [
+      'photo_uploaded', 'approved', 'sent_to_printer', 'printer_processing',
+      'printing', 'ready_for_dispatch', 'in_transit', 'delivered', 'completed'
+    ];
+    const readyOrConditions = [
+      { customizationStatus: 'completed' },
+      { designLockedAt: { $ne: null } },
+      { 'images.0': { $exists: true } },
+      { workflowStatus: { $in: READY_WORKFLOW_STATUSES } },
+      { uploadStatus: 'ready' }
+    ];
+    // The Approved / Printing / Completed tabs key off workflowStatus alone
+    // in the client's click-through filter (every order has one, defaulting
+    // to 'order_received', so its equality check always wins over the
+    // adminApprovalStatus fallback branches below it) - matched here 1:1.
+    const TAB_FILTERS = {
+      all:             {},
+      ready:           { $or: readyOrConditions },
+      pending:         { $nor: readyOrConditions },
+      approved:        { workflowStatus: 'approved' },
+      sent_to_printer: { workflowStatus: 'sent_to_printer' },
+      completed:       { workflowStatus: 'completed' }
+    };
+
     // Combine with tab status and search
     const filter = { $and: [baseFilter] };
 
-    if (status && status !== 'all') {
-      filter.$and.push({ uploadStatus: status });
+    // Unrecognised status values (there shouldn't be any - this list matches
+    // every tab key the admin Orders page renders) fall through as 'all'
+    // rather than a filter no order can ever match.
+    if (status && status !== 'all' && TAB_FILTERS[status]) {
+      filter.$and.push(TAB_FILTERS[status]);
     }
     if (search) {
       filter.$and.push({
@@ -54,7 +85,10 @@ router.get('/', adminMiddleware, async (req, res) => {
     }
 
     // Run all queries in parallel for speed — fetch full unstripped orders
-    const [orders, total, pending, ready, revision] = await Promise.all([
+    const [
+      orders, total, pending, ready, revision,
+      tabAll, tabReady, tabPending, tabApproved, tabSentToPrinter, tabCompleted
+    ] = await Promise.all([
       Order.find(filter)
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
@@ -63,15 +97,37 @@ router.get('/', adminMiddleware, async (req, res) => {
       Order.countDocuments(filter),
       Order.countDocuments({ $and: [baseFilter, { customizationStatus: { $ne: 'completed' } }] }),
       Order.countDocuments({ $and: [baseFilter, { uploadStatus: 'ready' }] }),
-      Order.countDocuments({ $and: [baseFilter, { uploadStatus: 'revision_requested' }] })
+      Order.countDocuments({ $and: [baseFilter, { uploadStatus: 'revision_requested' }] }),
+      // tabCounts: computed over the full corpus (ignoring the active search,
+      // same as the printer queue's tabCounts), so switching tabs always
+      // shows a count consistent with what that tab will actually contain.
+      Order.countDocuments(baseFilter),
+      Order.countDocuments({ $and: [baseFilter, TAB_FILTERS.ready] }),
+      Order.countDocuments({ $and: [baseFilter, TAB_FILTERS.pending] }),
+      Order.countDocuments({ $and: [baseFilter, TAB_FILTERS.approved] }),
+      Order.countDocuments({ $and: [baseFilter, TAB_FILTERS.sent_to_printer] }),
+      Order.countDocuments({ $and: [baseFilter, TAB_FILTERS.completed] })
     ]);
 
     console.log('[ORDERS] Result: active orders returned:', orders.length, '| total active:', total, '| pending:', pending, '| ready:', ready);
 
+    // Orders have no top-level dpi/dpiStatus field - derive it at read time
+    // from printFiles[] (see deriveDpiStatus) so the admin UI shows a real
+    // status/"Not Checked" instead of a permanently blank badge.
+    const ordersWithDpi = orders.map(o => ({ ...o, ...deriveDpiStatus(o) }));
+
     return res.json({
-      orders,
+      orders: ordersWithDpi,
       pagination: { total, page, limit, pages: Math.ceil(total / limit) },
-      stats: { total, pending, ready, revision }
+      stats: { total, pending, ready, revision },
+      tabCounts: {
+        all: tabAll,
+        ready: tabReady,
+        pending: tabPending,
+        approved: tabApproved,
+        sent_to_printer: tabSentToPrinter,
+        completed: tabCompleted
+      }
     });
   } catch (err) {
     console.error('[GET /api/orders] Error:', err.message, err.stack);
@@ -423,14 +479,31 @@ router.post('/:id/upload', authMiddleware(), (req, res) => {
         .jpeg({ quality: 82 })
         .toFile(path.join(PREVIEWS_DIR, previewName));
 
-      // Save both to GridFS in the background so the response is fast
-      const { saveToGridFS } = require('../utils/dbStorage');
-      saveToGridFS(req.file.filename, req.file.path).catch(gridfsErr => {
-        console.error('[GridFS Order Upload Save Error - Original]', gridfsErr);
-      });
-      saveToGridFS(previewName, path.join(PREVIEWS_DIR, previewName)).catch(gridfsErr => {
-        console.error('[GridFS Order Upload Save Error - Preview]', gridfsErr);
-      });
+      // S3 is the only persistent store the /uploads serving middleware
+      // (server/index.js) actually knows how to fall back to - it checks
+      // os.tmpdir() (Vercel) then S3, never this route's own on-disk
+      // UPLOADS_DIR/PREVIEWS_DIR. GridFS was never wired into that
+      // middleware at all, so a photo saved only there previously became a
+      // permanently broken image the moment local disk was cleared (e.g.
+      // between requests once the customer had moved on to another page).
+      // Matches the pattern already used by publicUpload.routes.js.
+      const previewPath = path.join(PREVIEWS_DIR, previewName);
+      const { saveToS3 } = require('../utils/s3Storage');
+      try {
+        await Promise.all([
+          saveToS3(`originals/${req.file.filename}`, req.file.path),
+          saveToS3(`previews/${previewName}`, previewPath)
+        ]);
+      } catch (s3Err) {
+        console.error('[S3 Order Upload Save Error]', s3Err);
+        fs.unlink(req.file.path, () => {});
+        fs.unlink(previewPath, () => {});
+        return res.status(502).json({ success: false, error: 'Failed to save your photo. Please try again.' });
+      }
+      if (process.env.NODE_ENV !== 'test' && process.env.JWT_SECRET !== 'test_secret_for_prink_suite') {
+        fs.unlink(req.file.path, () => {});
+        fs.unlink(previewPath, () => {});
+      }
 
       const image = {
         id: `img_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
@@ -521,12 +594,21 @@ router.post('/:id/design', authMiddleware(), async (req, res) => {
               if (!isVercel && !fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
               const filepath = path.join(uploadsDir, filename);
               fs.writeFileSync(filepath, buffer);
-              
-              // Save to GridFS for deployment persistence (in the background for fast response)
-              const { saveToGridFS } = require('../utils/dbStorage');
-              saveToGridFS(filename, filepath).catch(gridfsErr => {
-                console.error('[GridFS Base64 Save Error]', gridfsErr);
-              });
+
+              // S3 is the only persistent store the /uploads serving
+              // middleware actually falls back to (see the equivalent
+              // comment on the /:id/upload route above) - GridFS alone left
+              // camera-captured photos (see capturePhoto() in
+              // CustomerPortal.tsx, which submits a data: URI here) broken
+              // the moment local disk was cleared.
+              const { saveToS3 } = require('../utils/s3Storage');
+              try {
+                await saveToS3(`originals/${filename}`, filepath);
+              } catch (s3Err) {
+                console.error('[S3 Base64 Save Error]', s3Err);
+                fs.unlink(filepath, () => {});
+                continue;
+              }
 
               processedImages.push({ ...img, src: '/uploads/originals/' + filename, url: '/uploads/originals/' + filename });
               continue;
@@ -621,11 +703,21 @@ router.post('/:id/review', adminMiddleware, async (req, res) => {
 
     if (isApproved) {
       if (isCached) {
-        updates.printGenerationStatus = 'completed';
+        updates.printGenerationStatus = derivePrintGenerationStatus(existingOrder.printFiles);
         updates.pdfUrl = existingOrder.printFiles[0].url;
+        if (updates.printGenerationStatus === 'completed') {
+          // Print file already exists and is complete - route straight to
+          // the printer queue.
+          updates.workflowStatus = 'sent_to_printer';
+          updates.printerAssignedAt = new Date();
+        }
+        // else: cached file has missing photo slots - stay at 'approved' so
+        // it doesn't reach the printer queue as if it were print-ready.
       } else {
         updates.designHash = currentHash;
         updates.printGenerationStatus = 'processing';
+        // stays 'approved'; runReviewGeneration promotes it to
+        // 'sent_to_printer' once the background render succeeds.
       }
     }
 
@@ -672,20 +764,33 @@ router.post('/:id/review', adminMiddleware, async (req, res) => {
         }
 
         const generated = printFiles.length > 0;
-        await Order.updateOne({ id }, {
-          $set: {
-            printFiles,
-            pdfUrl: generated ? printFiles[0].url : null,
-            printGenerationStatus: generated ? 'completed' : 'failed'
-          }
-        });
+        const genStatus = derivePrintGenerationStatus(printFiles);
+        const genSet = {
+          printFiles,
+          pdfUrl: generated ? printFiles[0].url : null,
+          printGenerationStatus: genStatus
+        };
+        // A successful, COMPLETE render is the last thing standing between an
+        // approved design and the printer queue, so route it there
+        // automatically - no separate manual "Route to Printer" click needed
+        // on the happy path. A file with missing photo slots ('partial')
+        // must not reach the printer queue looking print-ready.
+        if (genStatus === 'completed' && isApproved) {
+          genSet.workflowStatus = 'sent_to_printer';
+          genSet.printStatus = 'queued';
+          genSet.printerAssignedAt = new Date();
+        }
+        await Order.updateOne({ id }, { $set: genSet });
 
+        const totalMissing = printFiles.reduce((n, f) => n + (f?.missingImages || 0), 0);
         await db.addActivityLog(
           id,
-          generated ? 'PDF_GENERATED' : 'PDF_FAILED',
-          generated
-            ? `Print file generated (${printFiles.length} of ${images.length}) in background.`
-            : 'Print file generation failed in background.'
+          generated ? (genStatus === 'completed' ? 'PDF_GENERATED' : 'PDF_PARTIAL') : 'PDF_FAILED',
+          genStatus === 'completed'
+            ? `Print file generated (${printFiles.length} of ${images.length}) and routed to the print queue in background.`
+            : generated
+              ? `Print file generated with ${totalMissing} missing photo(s) - held at 'approved', NOT routed to the printer.`
+              : 'Print file generation failed in background.'
         );
         return printFiles;
       } catch (bgErr) {
@@ -838,9 +943,10 @@ router.post('/:id/regenerate', adminMiddleware, async (req, res) => {
       printFiles,
       templateId: template.id,
       pdfUrl: printFiles[0].url,
-      printGenerationStatus: failures.length ? 'partial' : 'completed',
+      printGenerationStatus: derivePrintGenerationStatus(printFiles, failures),
       printGenerationErrors: failures
     };
+    updateData.workflowStatus = reconcileWorkflowStatus({ ...order, ...updateData });
 
     const updated = await db.updateOrder(id, updateData);
     await db.addActivityLog(id, 'PDF_REGENERATED',
@@ -951,16 +1057,20 @@ router.post('/:id/submit-design', adminMiddleware, async (req, res) => {
       }
     }
 
-    const finalOrder = await db.updateOrder(id, {
+    const submitUpdates = {
       printFiles: printFiles.length ? printFiles : refreshed.printFiles,
       pdfUrl: printFiles.length ? printFiles[0].url : refreshed.pdfUrl,
-      printGenerationStatus: failures.length ? (printFiles.length ? 'partial' : 'failed') : 'completed',
+      printGenerationStatus: printFiles.length ? derivePrintGenerationStatus(printFiles, failures) : 'failed',
       printGenerationErrors: failures,
       printStatus: 'queued',
       orderStatus: 'Approved',
       adminApprovalStatus: 'approved',
       printerAssignedAt: new Date()
-    });
+    };
+    // Keep workflowStatus consistent with the sub-fields we just wrote,
+    // instead of leaving it stuck at whatever the customer submit set.
+    submitUpdates.workflowStatus = reconcileWorkflowStatus({ ...refreshed, ...submitUpdates });
+    const finalOrder = await db.updateOrder(id, submitUpdates);
 
     await db.addActivityLog(id, 'ADMIN_EDITED_DESIGN', 'An administrator edited the design layout or photos.');
     
@@ -1042,7 +1152,7 @@ router.post('/:id/force-approve', adminMiddleware, async (req, res) => {
             templateId: result.templateId,
             templateSide: result.templateSide,
             linkedOrderId: result.linkedOrderId,
-            printGenerationStatus: result.generated ? 'completed' : 'pending'
+            printGenerationStatus: result.printGenerationStatus || 'pending'
           };
         } catch (err) {
           console.error('[FORCE APPROVE BUTTERFLY ALLOCATION ERROR]', id, err.message);
@@ -1075,6 +1185,9 @@ router.post('/:id/force-approve', adminMiddleware, async (req, res) => {
     const updateData = {
       designLockedAt: order.designLockedAt || new Date(),
       customizationStatus: 'completed',
+      // Default for the magazine/canvas branches, which don't set this
+      // themselves; the butterfly branch's extraUpdateData overrides it.
+      printGenerationStatus: derivePrintGenerationStatus(printFiles),
       ...extraUpdateData,
       uploadStatus: 'ready',
       adminApprovalStatus: 'approved',
@@ -1083,7 +1196,8 @@ router.post('/:id/force-approve', adminMiddleware, async (req, res) => {
       printFiles,
       pdfUrl: printFiles[0].url
     };
-    
+    updateData.workflowStatus = reconcileWorkflowStatus({ ...order, ...updateData });
+
     await db.addActivityLog(id, 'PDF_REGENERATED', `An administrator generated a new production print file.`);
 
     const updated = await db.updateOrder(id, updateData);
@@ -1170,19 +1284,79 @@ router.post('/:id/notify', adminMiddleware, async (req, res) => {
 // Admin only - anyone could otherwise drive any order to any status.
 router.patch('/:id/status', adminMiddleware, async (req, res) => {
   try {
-    const { status, orderStatus, printStatus, deliveryStatus } = req.body;
+    const { status, orderStatus, printStatus, deliveryStatus, workflowStatus } = req.body;
     const updates = {};
 
     if (orderStatus) updates.orderStatus = orderStatus;
     if (status) updates.orderStatus = status;
     if (printStatus) updates.printStatus = printStatus;
     if (deliveryStatus) updates.deliveryStatus = deliveryStatus;
+    if (workflowStatus) updates.workflowStatus = workflowStatus;
+
+    // Keep workflowStatus in sync with whatever sub-field just changed, unless
+    // the caller set it explicitly.
+    if (!workflowStatus && Object.keys(updates).length > 0) {
+      const existing = await db.getOrderById(req.params.id);
+      if (existing) updates.workflowStatus = reconcileWorkflowStatus({ ...existing, ...updates });
+    }
 
     const order = await db.updateOrder(req.params.id, updates);
     if (orderStatus || status) {
       await db.addActivityLog(req.params.id, 'STATUS_UPDATE', `Order status updated to ${orderStatus || status}`);
     }
     res.json({ success: true, order });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * Apply a Shopify-detected shipped/delivered signal (see
+ * shopifyWebhookService.js's detectPendingDeliveryUpdate) to this order's
+ * real deliveryStatus/workflowStatus. Deliberately a separate, explicit
+ * admin action rather than automatic - Shopify's fulfillment data can be
+ * wrong or premature.
+ */
+router.post('/:id/confirm-delivery-update', adminMiddleware, async (req, res) => {
+  try {
+    const order = await db.getOrderById(req.params.id);
+    if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
+    const pending = order.pendingDeliveryUpdate;
+    if (!pending || !pending.status) {
+      return res.status(409).json({ success: false, error: 'No pending Shopify delivery update for this order.' });
+    }
+
+    const updates = {
+      deliveryStatus: pending.status,
+      trackingNumber: pending.trackingNumber || order.trackingNumber,
+      trackingUrl: pending.trackingUrl || order.trackingUrl,
+      trackingCompany: pending.trackingCompany || order.trackingCompany,
+      pendingDeliveryUpdate: null
+    };
+    updates.workflowStatus = reconcileWorkflowStatus({ ...order, ...updates });
+
+    const updated = await db.updateOrder(order.id, updates);
+    await db.addActivityLog(order.id, 'DELIVERY_CONFIRMED',
+      `Admin ${req.user?.email || ''} confirmed Shopify's "${pending.status}" update.`);
+    res.json({ success: true, order: updated });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** Discard a pending Shopify delivery update without applying it (e.g. Shopify's data looked wrong). */
+router.post('/:id/dismiss-delivery-update', adminMiddleware, async (req, res) => {
+  try {
+    const order = await db.getOrderById(req.params.id);
+    if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (!order.pendingDeliveryUpdate) {
+      return res.status(409).json({ success: false, error: 'No pending Shopify delivery update for this order.' });
+    }
+
+    const updated = await db.updateOrder(order.id, { pendingDeliveryUpdate: null });
+    await db.addActivityLog(order.id, 'DELIVERY_UPDATE_DISMISSED',
+      `Admin ${req.user?.email || ''} dismissed a Shopify delivery update.`);
+    res.json({ success: true, order: updated });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

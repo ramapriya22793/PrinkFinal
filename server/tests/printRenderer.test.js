@@ -6,6 +6,12 @@
  * from the original HD file rather than an upscaled preview.
  */
 
+// generatePrintPdf persists to S3 (server/utils/s3Storage.js) - without a
+// bucket configured in this environment, saveToS3 hits its own test-mode
+// bypass (NODE_ENV==='test') and no-ops instead of throwing. Must be set
+// before generatePrintPdf's first call, so it's set here at module load.
+process.env.NODE_ENV = 'test';
+
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

@@ -38,6 +38,13 @@ async function generateButterflyBoxPdf({ orderId, images, order, orderId2, image
 
   const getImgKey = (img) => img.id || img.url || img.serverFilename || JSON.stringify(img);
 
+  // Every original image this call couldn't resolve (local disk, S3, and
+  // GridFS all missed) gets a grey placeholder so the layout still renders -
+  // but the caller MUST know this happened. A placeholder-filled PDF is not
+  // a real print file, and reporting printGenerationStatus:'completed' for
+  // one silently ships an order with blank photos. See missingImageCount.
+  let missingImageCount = 0;
+
   // Helper to process a set of padded images by only rendering unique ones
   const processImagesList = async (imgs) => {
     const uniqueMap = new Map();
@@ -56,6 +63,7 @@ async function generateButterflyBoxPdf({ orderId, images, order, orderId2, image
 
       if (!src) {
         console.warn(`[WARNING] Could not find original file for image ${img.id || 'unknown'}. Using placeholder.`);
+        missingImageCount++;
         return await require('sharp')({
           create: { width: 1000, height: 1000, channels: 4, background: { r: 230, g: 230, b: 230, alpha: 1 } }
         }).jpeg({ quality: 90 }).toBuffer();
@@ -130,12 +138,14 @@ async function generateButterflyBoxPdf({ orderId, images, order, orderId2, image
   const outputPath = path.join(PRINT_DIR, filename);
 
   return new Promise((resolve, reject) => {
-    // Start with A4 size for the first page (Job Ticket)
+    // Single composite print sheet only (custom 13x19in). The A4 "job
+    // ticket" cover page was dropped per client feedback — the printer
+    // just needs the artwork, not the order/QC summary page.
     const doc = new PDFDocument({
-      size: 'A4',
+      size: [pageW, pageH],
       margin: 0,
       info: {
-        Title: `Butterfly Box Job Ticket - ${templateId || orderId}`,
+        Title: `Butterfly Box Print Sheet - ${templateId || orderId}`,
         Author: 'THE PRINK'
       }
     });
@@ -143,167 +153,9 @@ async function generateButterflyBoxPdf({ orderId, images, order, orderId2, image
     const stream = fs.createWriteStream(outputPath);
     doc.pipe(stream);
 
-    // ==========================================
-    // PAGE 1: PRINT PRODUCTION JOB TICKET (A4)
-    // ==========================================
-    doc.rect(0, 0, 595, 842).fill('#ffffff');
-
-    // 1. Header Bar
-    doc.rect(0, 0, 595, 60).fill('#f8fafc');
-    doc.rect(0, 57, 595, 3).fill('#171C62');
-    
-    const logoImgPath = path.join(__dirname, '..', '..', 'apps', 'customer', 'src', 'assets', 'logos', 'main-logo.png');
-    if (fs.existsSync(logoImgPath)) {
-      doc.image(logoImgPath, 20, 15, { height: 30 });
-    }
-    doc.fillColor('#171C62').font('Helvetica-Bold').fontSize(14).text('BUTTERFLY BOX JOB TICKET', 300, 24, { align: 'right', width: 275 });
-
-    // 2. Barcode Simulation
-    const drawBarcode = (startX, startY) => {
-      const lineCount = 35;
-      const lineWidths = [1, 2, 3, 1, 1, 2, 4, 1, 2, 1, 3, 2, 1, 1, 4, 2, 1, 2, 3, 1, 1, 2, 1, 4, 1, 2, 3, 2, 1, 1, 2, 1, 3, 2, 1];
-      let currentX = startX;
-      for (let i = 0; i < lineCount; i++) {
-        const w = lineWidths[i % lineWidths.length];
-        doc.rect(currentX, startY, w, 20).fill('#000000');
-        currentX += w + (i % 3 === 0 ? 2 : 1);
-      }
-      doc.fillColor('#64748b').font('Helvetica').fontSize(6).text(`*${orderId}*`, startX + 15, startY + 23);
-    };
-    drawBarcode(420, 75);
-
-    // Header Meta
-    doc.font('Helvetica-Bold').fontSize(10).fillColor('#171C62').text(`ORDER ${orderId}`, 20, 75);
-    doc.font('Helvetica').fontSize(7.5).fillColor('#64748b');
-    doc.text(`Department: Print Operations & Fulfillment`, 20, 88);
-    doc.text(`Generated: ${new Date().toLocaleString()}`, 20, 98);
-
-    const drawPanelHeader = (title, x, y, w) => {
-      doc.fillColor('#171C62').font('Helvetica-Bold').fontSize(8.5).text(title, x, y);
-      doc.lineWidth(0.75).strokeColor('#e2e8f0').moveTo(x, y + 12).lineTo(x + w, y + 12).stroke();
-    };
-
-    const renderMetaLine = (label, value, y) => {
-      doc.font('Helvetica-Bold').fillColor('#475569').fontSize(7.5).text(label, 20, y);
-      doc.font('Helvetica').fillColor('#1e293b').fontSize(7.5).text(value, 110, y);
-    };
-
-    // Panel 1: Order Information
-    let curY = 120;
-    drawPanelHeader('1. ORDER DETAILS', 20, curY, 260);
-    renderMetaLine('Blue Order ID:', orderId, curY + 20);
-    renderMetaLine('Red Order ID:', orderId2 || 'N/A', curY + 32);
-    renderMetaLine('Order Date:', order?.createdAt ? new Date(order.createdAt).toLocaleDateString() : 'N/A', curY + 44);
-    renderMetaLine('Due Date:', 'N/A', curY + 56);
-    renderMetaLine('Workflow Status:', 'PRINT READY', curY + 68);
-
-    // Panel 2: Customer details
-    curY = 215;
-    drawPanelHeader('2. CUSTOMER DETAILS', 20, curY, 260);
-    const cust = order?.customer || {};
-    const cust2 = order2?.customer || {};
-    renderMetaLine('Blue Customer:', cust.name || 'No Name provided', curY + 20);
-    renderMetaLine('Blue Contact:', `${cust.phone || 'No Phone'} | ${cust.email || 'No Email'}`, curY + 32);
-    renderMetaLine('Red Customer:', cust2.name || 'No Name provided', curY + 44);
-    renderMetaLine('Red Contact:', `${cust2.phone || 'No Phone'} | ${cust2.email || 'No Email'}`, curY + 56);
-
-    // Panel 3: Shipping Target Address
-    curY = 300;
-    drawPanelHeader('3. SHIPPING TARGET', 20, curY, 260);
-    if (order?.shippingAddress) {
-      const addr = order.shippingAddress;
-      doc.font('Helvetica').fillColor('#1e293b').fontSize(7.5);
-      doc.text(`${addr.address1 || ''}`, 20, curY + 20, { width: 260 });
-      let nextY = curY + 32;
-      if (addr.address2) {
-        doc.text(`${addr.address2}`, 20, nextY, { width: 260 });
-        nextY += 12;
-      }
-      doc.text(`${addr.city || ''}, ${addr.province || ''} ${addr.zip || ''}`, 20, nextY, { width: 260 });
-      doc.text(`${addr.country || ''}`, 20, nextY + 12, { width: 260 });
-    } else {
-      doc.font('Helvetica-Oblique').fillColor('#64748b').fontSize(7.5).text('No shipping address provided.', 20, curY + 20);
-    }
-
-    // Panel 4: Specifications (Right side)
-    const col2X = 315;
-    curY = 120;
-    drawPanelHeader('4. PRODUCT DETAILS & SPECS', col2X, curY, 260);
-    
-    const renderSpecLine = (label, value, y) => {
-      doc.font('Helvetica-Bold').fillColor('#475569').fontSize(7.5).text(label, col2X, y);
-      doc.font('Helvetica').fillColor('#1e293b').fontSize(7.5).text(value, col2X + 100, y);
-    };
-
-    renderSpecLine('Product Name:', 'Prink Butterfly Box', curY + 20);
-    renderSpecLine('Product Class:', 'Butterfly Box', curY + 32);
-    renderSpecLine('Substrate:', 'Fine Cardboard & Plastic', curY + 44);
-    renderSpecLine('Print Subsystem:', 'HP Latex 365 Press', curY + 56);
-    renderSpecLine('Ink Set Profile:', 'Eco-Solvent CMYK', curY + 68);
-
-    // Panel 5: Compliance checklist
-    curY = 215;
-    drawPanelHeader('5. QUALITY COMPLIANCE CHECKLIST', col2X, curY, 260);
-    
-    const renderCheckLine = (check, status, y) => {
-      doc.font('Helvetica-Bold').fillColor('#475569').fontSize(7.5).text(check, col2X, y);
-      doc.fillColor(status === 'PASSED' ? '#0fbe88' : '#e11d48').font('Helvetica-Bold').fontSize(7.5).text(`[ ${status} ]`, col2X + 205, y);
-    };
-
-    renderCheckLine('File Resolution:', 'PASSED', curY + 20);
-    renderCheckLine('DPI Validation:', 'PASSED', curY + 32);
-    renderCheckLine('Safe Margin Buffers:', 'PASSED', curY + 44);
-    renderCheckLine('Bleed Align Boundaries:', 'PASSED', curY + 56);
-
-    // Panel 6: Uploaded Assets Preview (A grid of all 8 photos)
-    curY = 390;
-    doc.fillColor('#171C62').font('Helvetica-Bold').fontSize(9).text('6. UPLOADED PHOTOS PREVIEW', 20, curY);
-    doc.lineWidth(0.75).strokeColor('#e2e8f0').moveTo(20, curY + 12).lineTo(575, curY + 12).stroke();
-    
-    const thumbSize = 52;
-    const gap = 15;
-    const startX = 20;
-    const startY = curY + 25;
-    
-    for (let i = 0; i < 8; i++) {
-      const col = i % 8;
-      const tx = startX + col * (thumbSize + gap);
-      const ty = startY;
-      
-      // Draw thumbnail box outline
-      doc.lineWidth(0.5).strokeColor('#cbd5e1').rect(tx, ty, thumbSize, thumbSize).stroke();
-      
-      if (processedBuffers[i]) {
-        try {
-          doc.image(processedBuffers[i], tx + 1, ty + 1, { width: thumbSize - 2, height: thumbSize - 2 });
-        } catch (e) {
-          console.error('[PDF Gen] Failed to render thumbnail:', e.message);
-        }
-      } else {
-        doc.fillColor('#f1f5f9').rect(tx + 1, ty + 1, thumbSize - 2, thumbSize - 2).fill();
-        doc.fillColor('#94a3b8').font('Helvetica').fontSize(6).text(`Slot ${i + 1}`, tx + 10, ty + 24);
-      }
-    }
-
-    // Signatures and Calibration Bars
-    curY = 740;
-    const barColors = ['#00FFFF', '#FF00FF', '#FFFF00', '#000000'];
-    barColors.forEach((col, index) => {
-      doc.rect(20 + (index * 20), curY, 15, 8).fill(col);
-    });
-    doc.fillColor('#94a3b8').font('Helvetica').fontSize(7);
-    doc.text('CMYK PRINT CALIBRATION BARS', 110, curY + 1);
-    doc.text('PAGE 1 OF 2  |  Generated by Prink Print-file Automation System', 300, curY + 1, { align: 'right', width: 275 });
-
-
     // =========================================================================
-    // PAGE 2: COMPOSITE PRINT SHEET (Custom 13x19 inch)
+    // COMPOSITE PRINT SHEET (Custom 13x19 inch) — the only page
     // =========================================================================
-    doc.addPage({
-      size: [pageW, pageH],
-      margin: 0
-    });
-
     doc.rect(0, 0, pageW, pageH).fill('#ffffff');
 
     // 3. Define Image Coordinates (in mm)
@@ -510,11 +362,12 @@ async function generateButterflyBoxPdf({ orderId, images, order, orderId2, image
       const stats = fs.statSync(outputPath);
       // S3 is the only persistent store - a print file that only exists in
       // this ephemeral temp dir is effectively lost, so treat a failed save
-      // as a failed generation rather than reporting success.
+      // as a failed generation rather than reporting success. The local
+      // copy is deliberately kept (not unlinked) after a successful upload -
+      // see server/utils/printRenderer.js's generatePrintPdf for why.
       try {
         const { saveToS3 } = require('./s3Storage');
         await saveToS3(`print/${filename}`, outputPath);
-        fs.unlink(outputPath, () => {});
       } catch (s3Err) {
         console.error('[S3 Butterfly Print PDF Save Error]', s3Err);
         return reject(s3Err);
@@ -531,7 +384,13 @@ async function generateButterflyBoxPdf({ orderId, images, order, orderId2, image
         belowMinimumDpi: false,
         colourSpace: 'RGB',
         templateId: 'butterfly-box',
-        generatedAt: new Date()
+        generatedAt: new Date(),
+        // How many of the customer's actual photos could NOT be resolved
+        // (local disk, S3 and GridFS all missed) and were rendered as grey
+        // placeholders instead. A generated file with missingImages > 0 is
+        // not a real print file - callers must not treat it as 'completed'.
+        missingImages: missingImageCount,
+        totalImages: images.length + (images2?.length || 0)
       });
     });
 

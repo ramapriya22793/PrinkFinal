@@ -48,8 +48,19 @@ interface AdminPortalProps {
 function dpiStatusBadge(status: string, label: string) {
   if (status === 'ok')   return <span className="badge badge-success">{label}</span>;
   if (status === 'low')  return <span className="badge badge-warning">{label}</span>;
-  return                         <span className="badge badge-error">{label}</span>;
+  if (status === 'not_checked' || !status) {
+    return <span className="badge badge-secondary" title="No print file generated yet - DPI is only known once one exists">Not Checked</span>;
+  }
+  return <span className="badge badge-error">{label}</span>;
 }
+
+// Orders don't carry a top-level `phone` field - it lives on the nested
+// Shopify customer object. Fall back to the top-level field too, in case
+// some order-creation path ever sets it directly.
+export const getCustomerPhone = (o: any): string => {
+  if (!o) return '';
+  return o.phone || (o.customer && typeof o.customer === 'object' ? o.customer.phone : '') || '';
+};
 
 export const hasCustomizationBeenReceived = (o: any): boolean => {
   if (!o) return false;
@@ -77,22 +88,25 @@ function workflowStatusBadge(ws: string | undefined | null, fallbackUploadStatus
     // Fall back to legacy upload status if no workflow status set
     return uploadStatusBadge(fallbackUploadStatus || 'pending');
   }
-  const meta: Record<string, { cls: string; label: string }> = {
-    order_received:          { cls: 'badge-info',    label: '🛒 Order Received' },
-    personalization_pending: { cls: 'badge-warning', label: '📷 Personalization Pending' },
-    photo_uploaded:          { cls: 'badge-info',    label: '📷 Personalization Submitted' },
-    approved:                { cls: 'badge-success', label: '✅ Approved' },
-    rejected:                { cls: 'badge-error',   label: '❌ Rejected' },
-    sent_to_printer:         { cls: 'badge-primary', label: '🖨️ Printing' },
-    printer_processing:      { cls: 'badge-warning', label: '⚙️ Printing' },
-    printing:                { cls: 'badge-warning', label: '🖨️ Printing' },
-    ready_for_dispatch:      { cls: 'badge-accent',  label: '📦 Ready for Dispatch' },
-    in_transit:              { cls: 'badge-accent',  label: '🚚 In Transit' },
-    delivered:               { cls: 'badge-success', label: '🎉 Delivered' },
-    completed:               { cls: 'badge-success', label: '🎉 Delivered' },
+  // Labels are kept short so the Upload Status column doesn't force the
+  // Orders table wider than the screen - the full phrase is still available
+  // as a tooltip.
+  const meta: Record<string, { cls: string; label: string; full: string }> = {
+    order_received:          { cls: 'badge-info',    label: '🛒 Received',   full: 'Order Received' },
+    personalization_pending: { cls: 'badge-warning', label: '📷 Pending',    full: 'Personalization Pending' },
+    photo_uploaded:          { cls: 'badge-info',    label: '📷 Submitted',  full: 'Personalization Submitted' },
+    approved:                { cls: 'badge-success', label: '✅ Approved',   full: 'Approved' },
+    rejected:                { cls: 'badge-error',   label: '❌ Rejected',   full: 'Rejected' },
+    sent_to_printer:         { cls: 'badge-primary', label: '🖨️ Printing',  full: 'Printing' },
+    printer_processing:      { cls: 'badge-warning', label: '⚙️ Printing',  full: 'Printing' },
+    printing:                { cls: 'badge-warning', label: '🖨️ Printing',  full: 'Printing' },
+    ready_for_dispatch:      { cls: 'badge-accent',  label: '📦 Ready',     full: 'Ready for Dispatch' },
+    in_transit:              { cls: 'badge-accent',  label: '🚚 In Transit',full: 'In Transit' },
+    delivered:               { cls: 'badge-success', label: '🎉 Delivered', full: 'Delivered' },
+    completed:               { cls: 'badge-success', label: '🎉 Delivered', full: 'Delivered' },
   };
   const m = meta[ws];
-  return m ? <span className={`badge ${m.cls}`}>{m.label}</span> : <span className="badge badge-primary">{ws}</span>;
+  return m ? <span className={`badge ${m.cls}`} title={m.full}>{m.label}</span> : <span className="badge badge-primary">{ws}</span>;
 }
 
 
@@ -209,8 +223,6 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
 
   // SKU Mappings States
   const [skuMappings, setSkuMappings] = useState<SkuMapping[]>([]);
-  const [showSkuModal, setShowSkuModal] = useState(false);
-  const [editingMapping, setEditingMapping] = useState<Partial<SkuMapping> | null>(null);
 
   // Database Templates States
   const [dbTemplates, setDbTemplates] = useState<TemplateItem[]>([]);
@@ -323,6 +335,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
   const isFetchingCustomers = useRef(false);
   const isFetchingOrders = useRef(false);
   const isFetchingQueue = useRef(false);
+  const isFetchingRecentSubmissions = useRef(false);
 
   useEffect(() => {
     if (screen === 'login') emailRef.current?.focus();
@@ -424,6 +437,8 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
   // from fetchOrders: that list is sorted by order creation time, not by
   // when (or whether) the customer submitted a design.
   const fetchRecentSubmissions = async () => {
+    if (isFetchingRecentSubmissions.current) return;
+    isFetchingRecentSubmissions.current = true;
     try {
       const res = await fetch('/api/orders/recent-submissions?limit=5', {
         headers: { 'Authorization': 'Bearer ' + localStorage.getItem('admin_token') }
@@ -434,6 +449,8 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
       }
     } catch (err) {
       console.error('[fetchRecentSubmissions] Exception:', err);
+    } finally {
+      isFetchingRecentSubmissions.current = false;
     }
   };
 
@@ -530,52 +547,6 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
       }
     } catch (err) {
       console.error('Failed to fetch settings:', err);
-    }
-  };
-
-  const saveSkuMapping = async () => {
-    if (!editingMapping?.sku || !editingMapping?.productType) {
-      showToast('SKU and Product Type are required.', 'warning');
-      return;
-    }
-    try {
-      const isNew = !editingMapping.id;
-      const url = isNew ? '/api/skus' : `/api/skus/${editingMapping.id}`;
-      const method = isNew ? 'POST' : 'PUT';
-      const res = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('admin_token')}`
-        },
-        body: JSON.stringify(editingMapping)
-      });
-      if (res.ok) {
-        showToast(`SKU Mapping ${isNew ? 'created' : 'updated'} successfully!`, 'success');
-        setShowSkuModal(false);
-        fetchSkuMappings();
-      } else {
-        const data = await res.json();
-        showToast(data.error || 'Failed to save SKU mapping.', 'error');
-      }
-    } catch (err) {
-      console.error('Error saving SKU mapping:', err);
-    }
-  };
-
-  const deleteSkuMapping = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this SKU mapping?')) return;
-    try {
-      const res = await fetch(`/api/skus/${id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('admin_token')}` }
-      });
-      if (res.ok) {
-        showToast('SKU Mapping deleted.', 'success');
-        fetchSkuMappings();
-      }
-    } catch (err) {
-      console.error('Error deleting SKU mapping:', err);
     }
   };
 
@@ -701,7 +672,15 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
       }, 10000);
       return () => clearInterval(interval);
     }
-  }, [screen]);
+    // orderTab/orderSearch are read via fetchOrders()'s defaults, not passed
+    // explicitly, so without them here this effect's closure - and the
+    // interval's - froze on whichever tab/search was active when `screen`
+    // last changed (typically just once, at login). Every 10s poll then
+    // silently reverted the Orders table back to the "All" tab's data,
+    // even while a different tab was selected and showing its own (correct)
+    // count. Recreating the interval whenever either changes keeps the poll
+    // aimed at what's actually on screen.
+  }, [screen, orderTab, orderSearch]);
 
   // Lazy, section-triggered fetches: each list loads the first time (and
   // every time) its section is opened, not preemptively on login.
@@ -966,6 +945,44 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
       setIsRoutingToPrinter(false);
   };
 
+  // Shopify's fulfillment webhook flags a shipped/delivered signal on the
+  // order (pendingDeliveryUpdate) but never applies it automatically -
+  // Shopify data can be wrong or premature, so an admin confirms or
+  // dismisses it explicitly.
+  const confirmDeliveryUpdate = async (order: Order) => {
+    try {
+      const res = await fetch(`/api/orders/${encodeURIComponent(order.id)}/confirm-delivery-update`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('admin_token')}` }
+      });
+      if (res.ok) {
+        showToast(`Order ${order.orderNumber || order.id} marked ${order.pendingDeliveryUpdate?.status}.`, 'success');
+        fetchOrders();
+      } else {
+        showToast('Failed to confirm the delivery update.', 'error');
+      }
+    } catch (err) {
+      showToast('Network error confirming the delivery update.', 'error');
+    }
+  };
+
+  const dismissDeliveryUpdate = async (order: Order) => {
+    try {
+      const res = await fetch(`/api/orders/${encodeURIComponent(order.id)}/dismiss-delivery-update`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('admin_token')}` }
+      });
+      if (res.ok) {
+        showToast('Dismissed.', 'info');
+        fetchOrders();
+      } else {
+        showToast('Failed to dismiss the delivery update.', 'error');
+      }
+    } catch (err) {
+      showToast('Network error dismissing the delivery update.', 'error');
+    }
+  };
+
   const markComplete = (id: string) => {
     setPrintQueue(prev => prev.map(q => q.id === id ? { ...q, status: 'completed' } : q));
     showToast(`Order ${id} marked as completed`, 'success');
@@ -1082,12 +1099,20 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
       if (orderTab === 'rejected') return o.adminApprovalStatus === 'rejected';
       return false;
     })
-    .filter(o =>
-      orderSearch.trim() === '' ||
-      o.id.toLowerCase().includes(orderSearch.toLowerCase()) ||
-      (typeof o.customer === 'object' ? (o.customer as any)?.name || 'Guest' : o.customer || 'Guest').toLowerCase().includes(orderSearch.toLowerCase()) ||
-      o.product.toLowerCase().includes(orderSearch.toLowerCase())
-    )
+    .filter(o => {
+      const q = orderSearch.trim().toLowerCase();
+      if (q === '') return true;
+      const customerName = typeof o.customer === 'object'
+        ? ((o.customer as any)?.name || 'Guest')
+        : (o.customer || 'Guest');
+      return [
+        o.id,
+        o.orderNumber,
+        (o as any).name,
+        customerName,
+        o.product,
+      ].some(v => String(v ?? '').toLowerCase().includes(q));
+    })
     .sort((a, b) => {
       const timeA = new Date(a.createdAt || a.date || 0).getTime();
       const timeB = new Date(b.createdAt || b.date || 0).getTime();
@@ -1112,31 +1137,37 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                 <div className="avatar" style={{ width: 28, height: 28, fontSize: '0.7rem', flexShrink: 0, backgroundColor: isRed ? '#ef4444' : undefined }}>
                   {nameStr[0] || 'G'}
                 </div>
-                {nameStr} {isRed && <span style={{ fontSize: '0.65rem', color: '#ef4444', fontWeight: 600, border: '1px solid #ef4444', padding: '1px 4px', borderRadius: '4px' }}>RED SIDE</span>}
+                <span style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={nameStr}>{nameStr}</span> {isRed && <span style={{ fontSize: '0.65rem', color: '#ef4444', fontWeight: 600, border: '1px solid #ef4444', padding: '1px 4px', borderRadius: '4px' }}>RED SIDE</span>}
               </>
             );
           })()}
         </div>
-        <div style={{ fontSize: '0.75rem', color: '#6b7280', paddingLeft: '2.25rem', marginTop: '0.1rem' }}>
+        <div
+          style={{ fontSize: '0.75rem', color: '#6b7280', paddingLeft: '2.25rem', marginTop: '0.1rem', maxWidth: 190, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          title={o.customerEmail || (o.customer && typeof o.customer === 'object' ? (o.customer as any).email : '') || o.email || 'N/A'}
+        >
           {o.customerEmail || (o.customer && typeof o.customer === 'object' ? (o.customer as any).email : '') || o.email || 'N/A'}
         </div>
-        {(o.shippingAddress || o.deliveryTemplate) && (
-          <div style={{ fontSize: '0.7rem', color: '#4b5563', paddingLeft: '2.25rem', marginTop: '0.15rem', display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
-            <i className="bi bi-geo-alt-fill" style={{ color: '#ec4899' }} />
-            <span>
-              {o.shippingAddress
-                ? (typeof o.shippingAddress === 'object'
-                  ? `${(o.shippingAddress as any).address1 || ''}, ${(o.shippingAddress as any).city || ''} ${(o.shippingAddress as any).zip || ''}`
-                  : String(o.shippingAddress))
-                : 'Standard Delivery'}
-            </span>
-            {(o.deliveryTemplate || o.shippingMethod || o.courierName) && (
-              <span className="badge badge-info" style={{ fontSize: '0.65rem', padding: '1px 5px' }}>
-                🚚 {o.deliveryTemplate || o.shippingMethod || o.courierName}
+        {(o.shippingAddress || o.deliveryTemplate) && (() => {
+          const addressText = o.shippingAddress
+            ? (typeof o.shippingAddress === 'object'
+              ? `${(o.shippingAddress as any).address1 || ''}, ${(o.shippingAddress as any).city || ''} ${(o.shippingAddress as any).zip || ''}`
+              : String(o.shippingAddress))
+            : 'Standard Delivery';
+          return (
+            <div style={{ fontSize: '0.7rem', color: '#4b5563', paddingLeft: '2.25rem', marginTop: '0.15rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }} title={addressText}>
+              <i className="bi bi-geo-alt-fill" style={{ color: '#ec4899', flexShrink: 0 }} />
+              <span style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {addressText}
               </span>
-            )}
-          </div>
-        )}
+              {(o.deliveryTemplate || o.shippingMethod || o.courierName) && (
+                <span className="badge badge-info" style={{ fontSize: '0.65rem', padding: '1px 5px', flexShrink: 0 }}>
+                  🚚 {o.deliveryTemplate || o.shippingMethod || o.courierName}
+                </span>
+              )}
+            </div>
+          );
+        })()}
 
         {o.images && o.images.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '0.25rem', paddingLeft: '2.25rem' }}>
@@ -1841,14 +1872,22 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                   ) : paginatedOrders.map(o => (
                     <tr key={o.id}>
                       <td>
-                        <a 
-                          href="#" 
+                        <a
+                          href="#"
                           onClick={(e) => { e.preventDefault(); setEditingOrder(o); }}
                           style={{ fontWeight: 700, color: '#4f46e5', textDecoration: 'underline' }}
-                          title="Click to open design editor"
+                          title={`Click to open design editor · Full ID: ${o.id}`}
                         >
-                          {o.id}
+                          #{o.orderNumber || o.id}
                         </a>
+                        {o.orderNumber && o.id !== o.orderNumber && (
+                          <div
+                            style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2, maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                            title={o.id}
+                          >
+                            {o.id}
+                          </div>
+                        )}
                       </td>
                       <td>
 
@@ -1879,10 +1918,45 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                         )}
 
                       </td>
-                      <td className="text-sm text-muted">{o.phone}</td>
-                      <td className="text-sm">{o.product}</td>
+                      <td className="text-sm text-muted">{getCustomerPhone(o) || '-'}</td>
+                      <td className="text-sm" style={{ maxWidth: 160 }}>
+                        <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={o.product}>
+                          {o.product}
+                        </span>
+                      </td>
                       <td>{dpiStatusBadge(o.dpiStatus, o.dpi)}</td>
-                      <td>{workflowStatusBadge(o.workflowStatus, o.uploadStatus)}</td>
+                      <td>
+                        {workflowStatusBadge(o.workflowStatus, o.uploadStatus)}
+                        {o.pendingDeliveryUpdate && (
+                          <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <span
+                              className="badge badge-warning"
+                              style={{ fontSize: 10, display: 'inline-flex', alignItems: 'center', gap: 4, width: 'fit-content' }}
+                              title={`Shopify fulfillment status: ${o.pendingDeliveryUpdate.shopifyFulfillmentStatus || 'unknown'}${o.pendingDeliveryUpdate.trackingNumber ? ' · Tracking: ' + o.pendingDeliveryUpdate.trackingNumber : ''}`}
+                            >
+                              <i className="bi bi-truck" /> Shopify: {o.pendingDeliveryUpdate.status === 'delivered' ? 'Delivered' : 'Shipped'}?
+                            </span>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              <button
+                                className="btn btn-primary btn-sm"
+                                style={{ fontSize: 10, padding: '2px 8px' }}
+                                onClick={() => confirmDeliveryUpdate(o)}
+                                title="Apply this to the customer's tracking status"
+                              >
+                                <i className="bi bi-check-lg" /> Confirm
+                              </button>
+                              <button
+                                className="btn btn-outline btn-sm"
+                                style={{ fontSize: 10, padding: '2px 8px' }}
+                                onClick={() => dismissDeliveryUpdate(o)}
+                                title="Ignore - Shopify's data looks wrong"
+                              >
+                                Dismiss
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </td>
                       <td className="text-sm text-muted">
                         {(o.uploadedAt || o.designLockedAt || o.updatedAt || o.createdAt) ? new Date((o.uploadedAt || o.designLockedAt || o.updatedAt || o.createdAt) as string).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : (o.date || '-')}
                       </td>
@@ -1891,16 +1965,16 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                           <button
                             className="btn btn-outline btn-sm"
                             onClick={() => setEditingOrder(o)}
-                            title="Open design editor for this order"
+                            title="Edit Design"
                           >
-                            <i className="bi bi-palette" /> Edit Design
+                            <i className="bi bi-palette" />
                           </button>
                           <button
                             className="btn btn-outline btn-sm"
                             onClick={() => document.getElementById(`admin-upload-input-${o.id}`)?.click()}
                             title="Upload photos directly to this order"
                           >
-                            <i className="bi bi-upload" /> Upload
+                            <i className="bi bi-upload" />
                           </button>
                           <input
                             type="file"
@@ -1933,7 +2007,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                             title="Download all customer uploads"
                             style={{ opacity: (!o.images || o.images.length === 0) ? 0.5 : 1 }}
                           >
-                            <i className="bi bi-download" /> Download
+                            <i className="bi bi-download" />
                           </button>
 
                           {/* Review button: show when photos uploaded and not yet approved */}
@@ -1942,8 +2016,9 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                               className="btn btn-primary btn-sm"
                               style={{ background: 'var(--accent)', borderColor: 'var(--accent)' }}
                               onClick={() => setReviewingOrder(o)}
+                              title="Review Photos"
                             >
-                              <i className="bi bi-shield-check" /> Review Photos
+                              <i className="bi bi-shield-check" />
                             </button>
                           )}
                           {/* Re-review button for rejected orders */}
@@ -1952,8 +2027,9 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                               className="btn btn-primary btn-sm"
                               style={{ background: '#dc2626', borderColor: '#dc2626' }}
                               onClick={() => setReviewingOrder(o)}
+                              title="Re-Review"
                             >
-                              <i className="bi bi-arrow-repeat" /> Re-Review
+                              <i className="bi bi-arrow-repeat" />
                             </button>
                           )}
                           {/* Route to printer: show when approved */}
@@ -1962,16 +2038,17 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                               id={`route-${o.id}`}
                               className="btn btn-primary btn-sm"
                               onClick={() => routeToPrinter(o)}
+                              title="Send to Printer"
                             >
-                              <i className="bi bi-printer" /> Send to Printer
+                              <i className="bi bi-printer" />
                             </button>
                           ) : (o.workflowStatus === 'sent_to_printer' || o.workflowStatus === 'printer_processing') ? (
-                            <span className="badge badge-primary" style={{ fontSize: 11 }}>
-                              <i className="bi bi-printer" /> {o.workflowStatus === 'sent_to_printer' ? 'At Printer' : 'Printing...'}
+                            <span className="badge badge-primary" style={{ fontSize: 11 }} title={o.workflowStatus === 'sent_to_printer' ? 'At Printer' : 'Printing'}>
+                              <i className="bi bi-printer" />
                             </span>
                           ) : o.workflowStatus === 'completed' ? (
-                            <span className="badge badge-success" style={{ fontSize: 11 }}>
-                              <i className="bi bi-check" /> Completed
+                            <span className="badge badge-success" style={{ fontSize: 11 }} title="Completed">
+                              <i className="bi bi-check" />
                             </span>
                           ) : (
                             <>
@@ -1981,7 +2058,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                                 onClick={() => sendWhatsApp(o.id, typeof o.customer === 'object' ? (o.customer as any)?.name : o.customer)}
                                 title="Send WhatsApp reminder"
                               >
-                                <i className="bi bi-whatsapp" /> Alert
+                                <i className="bi bi-whatsapp" />
                               </button>
                               {o.dpiStatus === 'low' && (
                                 <button
@@ -1989,8 +2066,9 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                                   className="btn btn-sm"
                                   style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fbbf24' }}
                                   onClick={() => forceApprove(o.id)}
+                                  title="Force Approve"
                                 >
-                                  <i className="bi bi-check2-circle" /> Force Approve
+                                  <i className="bi bi-check2-circle" />
                                 </button>
                               )}
                             </>
@@ -2065,9 +2143,9 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
             {/* Stats row — computed from real live customization tracker */}
             <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
               {[
-                { label: 'Total Orders', value: `${orders.length} orders`, icon: 'bi-box-seam', cls: '' },
-                { label: 'Ready (Customization Received)', value: `${orders.filter(hasCustomizationBeenReceived).length} orders`, icon: 'bi-check-circle-fill', cls: ' success' },
-                { label: 'Pending (Customization Needed)', value: `${orders.filter(o => !hasCustomizationBeenReceived(o)).length} orders`, icon: 'bi-hourglass-split', cls: ' accent' },
+                { label: 'Total Orders', value: `${orderStats.total || orders.length} orders`, icon: 'bi-box-seam', cls: '' },
+                { label: 'Ready (Customization Received)', value: `${tabCounts.ready || 0} orders`, icon: 'bi-check-circle-fill', cls: ' success' },
+                { label: 'Pending (Customization Needed)', value: `${tabCounts.pending || 0} orders`, icon: 'bi-hourglass-split', cls: ' accent' },
               ].map(s => (
                 <div key={s.label} className={`metric-card${s.cls}`} style={{ flex: '1 1 160px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -2120,11 +2198,11 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
                 }
                 return monitorOrders.map(o => (
                   <div key={o.id} className="card p-4" style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', flexWrap: 'wrap' }}>
-                    <div className="avatar" style={{ width: 44, height: 44, fontSize: '1rem', flexShrink: 0 }}>{(typeof o.customer === 'object' ? (o.customer as any)?.name : o.customer || 'Guest')[0]}</div>
+                    <div className="avatar" style={{ width: 44, height: 44, fontSize: '1rem', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><i className="bi bi-box-seam" /></div>
                     <div style={{ flex: 1, minWidth: 160 }}>
-                      <div style={{ fontWeight: 600, color: 'var(--primary)', marginBottom: 2 }}>{typeof o.customer === 'object' ? (o.customer as any)?.name : o.customer || 'Guest'}</div>
+                      <div style={{ fontWeight: 600, color: 'var(--primary)', marginBottom: 2 }}>Order #{o.orderNumber || o.id}</div>
                       <div className="text-sm text-muted">{o.product}</div>
-                      <div className="text-xs text-muted">{o.phone}</div>
+                      <div className="text-xs text-muted">{getCustomerPhone(o) || '-'}</div>
                       {o.images && o.images.length > 0 && (
                         <div style={{ marginTop: '0.25rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                           <a 
@@ -2912,85 +2990,10 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
       ) : (
         <>
         {/* =======================================================================
-            SKU RULES CONFIGURATION MODAL
-            ======================================================================= */}
-        {showSkuModal && editingMapping && (
-          <div className="modal-overlay" onClick={() => setShowSkuModal(false)}>
-            <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 440 }}>
-              <div className="flex align-center justify-between" style={{ marginBottom: '1.25rem' }}>
-                <h2 className="font-bold" style={{ color: 'var(--primary)', margin: 0, fontSize: '1.1rem' }}>
-                  {editingMapping.id ? 'Edit SKU Rule Mapping' : 'Define New SKU Mapping'}
-                </h2>
-                <button className="btn btn-outline btn-sm" onClick={() => setShowSkuModal(false)}>
-                  <i className="bi bi-x-lg" />
-                </button>
-              </div>
-
-              <div className="flex flex-col gap-4">
-                <div>
-                  <label className="label text-xs font-semibold" htmlFor="mapping-sku" style={{ marginBottom: '0.2rem' }}>
-                    Shopify SKU Prefix / Match Code:
-                  </label>
-                  <input
-                    id="mapping-sku"
-                    className="input text-xs"
-                    type="text"
-                    placeholder="E.g. PRK-MUG-CLASSIC"
-                    value={editingMapping.sku || ''}
-                    onChange={e => setEditingMapping({ ...editingMapping, sku: e.target.value })}
-                  />
-                </div>
-
-                <div>
-                  <label className="label text-xs font-semibold" htmlFor="mapping-product" style={{ marginBottom: '0.2rem' }}>
-                    Mapped Product Canvas Type:
-                  </label>
-                  <select
-                    id="mapping-product"
-                    className="input text-xs"
-                    value={editingMapping.productType || 'mug'}
-                    onChange={e => setEditingMapping({ ...editingMapping, productType: e.target.value as any })}
-                  >
-                    <option value="mug">Coffee Mug Wrap</option>
-                    <option value="canvas">Stretch Canvas</option>
-                    <option value="frame">Photo Frame</option>
-                    <option value="calendar">Wall Calendar</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="label text-xs font-semibold" htmlFor="mapping-template" style={{ marginBottom: '0.2rem' }}>
-                    Associated Canva Design Template:
-                  </label>
-                  <select
-                    id="mapping-template"
-                    className="input text-xs"
-                    value={editingMapping.templateId || ''}
-                    onChange={e => setEditingMapping({ ...editingMapping, templateId: e.target.value })}
-                  >
-                    <option value="">None (Generic Blank Layout)</option>
-                    {(dbTemplates.length > 0 ? dbTemplates : TEMPLATES).map(t => (
-                      <option key={t.id} value={t.id}>{t.name} ({t.productType})</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="flex gap-2 justify-end" style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
-                  <button className="btn btn-secondary" onClick={() => setShowSkuModal(false)}>Cancel</button>
-                  <button className="btn btn-primary" onClick={saveSkuMapping}>
-                    Save Mapping Rule
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* =======================================================================
             TEMPLATES BUILDER CONFIGURATION MODAL
             ======================================================================= */}
         {showTemplateModal && editingTemplate && (
-          <div className="modal-overlay" onClick={() => setShowTemplateModal(false)}>
+          <div className="modal-overlay active" onClick={() => setShowTemplateModal(false)}>
             <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>
               <div className="flex align-center justify-between" style={{ marginBottom: '1.25rem' }}>
                 <h2 className="font-bold" style={{ color: 'var(--primary)', margin: 0, fontSize: '1.1rem' }}>
@@ -3091,7 +3094,7 @@ const AdminPortal: React.FC<AdminPortalProps> = ({ onRouteToPrinter }) => {
         )}
         {/* Customer Uploaded Photos Pop-up Modal */}
         {activePhotosModalOrder && (
-          <div className="modal-overlay" onClick={() => setActivePhotosModalOrder(null)}>
+          <div className="modal-overlay active" onClick={() => setActivePhotosModalOrder(null)}>
             <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 900, width: '90vw' }}>
               <div className="flex align-center justify-between" style={{ marginBottom: '1.25rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem' }}>
                 <div>

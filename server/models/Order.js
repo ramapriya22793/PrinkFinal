@@ -13,6 +13,12 @@ const orderSchema = new mongoose.Schema({
   product: { type: String },
   productType: { type: String },
   productImage: { type: String },
+  // Line item's Shopify product_id, used to (re-)resolve productImage
+  // against the synced ShopifyProduct catalog - kept even when productImage
+  // itself couldn't be resolved yet (e.g. the product catalog sync hadn't
+  // caught up), so a later backfill has an exact join key instead of
+  // falling back to fuzzy SKU matching.
+  shopifyProductId: { type: String },
   // ─── Customization Config ────────────────────────────────────────────────
   // Whether this product/line-item requires customer photo upload.
   requiresCustomization: { type: Boolean, default: true },
@@ -47,7 +53,18 @@ const orderSchema = new mongoose.Schema({
   customizationStatus: { type: String, default: 'pending' },
   orderStatus: { type: String, default: 'Pending' }, // Pending -> Approved -> Printing -> Shipped -> Delivered
   adminApprovalStatus: { type: String, default: 'pending' }, // pending, approved, rejected
-  printStatus: { type: String, default: 'queued' }, // queued, printing, completed
+  // Defaults to 'pending', not 'queued' - printer.routes.js's own state
+  // machine (STAGE_ORDER/ALLOWED_TRANSITIONS/DASHBOARD_STATUS) treats
+  // 'queued' as "Print Ready", a status only earned after the customer has
+  // uploaded photos and an admin has approved the design (see
+  // order.routes.js's approve/generate-print-file flows, which explicitly
+  // set printStatus:'queued' at that point). Defaulting new orders straight
+  // to 'queued' put every order in the printer dashboard's Print Ready tab
+  // from the moment it was created - before any photo, design lock, or
+  // approval existed - which both hid genuinely ready orders in the noise
+  // and gave printers nothing to generate a file from.
+  printStatus: { type: String, default: 'pending' }, // pending, queued, processing, completed
+
 
   // ─── Unified Workflow Status ─────────────────────────────────────────────
   // Single source of truth for the 6-stage tracking flow shown across all portals:
@@ -76,7 +93,15 @@ const orderSchema = new mongoose.Schema({
   pdfUrl: { type: String },
   trackingNumber: { type: String },
   trackingUrl: { type: String },
-  trackingCompany: { type: String }
+  trackingCompany: { type: String },
+  // A Shopify fulfillment webhook detected a shipped/delivered signal that
+  // hasn't been confirmed yet. Deliberately NOT applied to deliveryStatus /
+  // workflowStatus automatically - an admin reviews and confirms it (or
+  // dismisses it if Shopify's data was wrong) via
+  // POST /:id/confirm-delivery-update. null once there's nothing pending.
+  // Shape: { status: 'shipped'|'delivered', trackingNumber, trackingUrl,
+  //          trackingCompany, shopifyFulfillmentStatus, detectedAt }
+  pendingDeliveryUpdate: { type: mongoose.Schema.Types.Mixed, default: null }
 }, { timestamps: true });
 
 // Indexes for the queries this app actually runs.

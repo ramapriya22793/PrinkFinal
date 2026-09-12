@@ -24,9 +24,18 @@ const startScheduledSyncJobs = () => {
   const runSyncWorkflows = async () => {
     try {
       console.log('[JOBS SYSTEM] Starting scheduled dataset sync...');
+      // Product catalog only, deliberately - this is what the admin SKU
+      // Mapping dropdown depends on, and the whole catalog is small enough
+      // to fully re-sync every run. runFullOrderSync/runFullCustomerSync
+      // page through the ENTIRE historical order/customer set with no date
+      // bound (confirmed while testing: it pulled in 800+ more orders in
+      // under 2 minutes and was still going) - orders already arrive via
+      // real-time webhooks, and a full unbounded resync running hourly
+      // forever is a much bigger, unbounded cost than this job should take
+      // on silently. Revisit if a genuine need for automatic order/customer
+      // backfill comes up - ideally via a date-bounded "recent" sync rather
+      // than this full one.
       await shopifyService.runFullProductSync(shop, token);
-      await shopifyService.runFullOrderSync(shop, token);
-      await shopifyService.runFullCustomerSync(shop, token);
       console.log('[JOBS SYSTEM] Scheduled dataset sync completed successfully.');
     } catch (err) {
       console.error('[JOBS SYSTEM ERROR] Synchronization job failed:', err.message);
