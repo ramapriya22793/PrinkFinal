@@ -27,13 +27,17 @@ const PRODUCT_TYPE_KEYWORDS = [
   ['mobilecase', 'mobilecase'],
   ['mobile case', 'mobilecase'],
   ['phone case', 'mobilecase'],
+  ['polaroid', 'polaroid'],
+  ['polaroid set', 'polaroid'],
+  ['polaroid print', 'polaroid'],
 ];
 
 /** Default photo count per product type, used when no SKU mapping overrides it. */
 const PHOTO_COUNT_BY_TYPE = {
   butterfly: 8, magazine: 4, photobook: 24,
   calendar: 12, frame: 4, mug: 1, tshirt: 1,
-  mobilecase: 1, pillow: 1, keychain: 2, canvas: 1
+  mobilecase: 1, pillow: 1, keychain: 2, canvas: 1,
+  polaroid: 20
 };
 
 /**

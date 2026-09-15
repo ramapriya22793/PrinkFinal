@@ -124,6 +124,11 @@ app.use('/uploads', async (req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Vary', 'Accept-Encoding');
 
+  const projectFile = path.join(__dirname, 'uploads', relPath);
+  if (fs.existsSync(projectFile) && fs.statSync(projectFile).isFile()) {
+    return res.sendFile(projectFile);
+  }
+
   const localFile = path.join(os.tmpdir(), 'prink-uploads', relPath);
   if (fs.existsSync(localFile) && fs.statSync(localFile).isFile()) {
     return res.sendFile(localFile);

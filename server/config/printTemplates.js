@@ -144,6 +144,20 @@ const DEFAULT_TEMPLATES = [
     maxImages: 2,
     allowedTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'],
     previewEnabled: true
+  },
+  {
+    id: 'tpl-polaroid-20',
+    name: 'Polaroid Prints (Set of 20)',
+    productType: 'polaroid',
+    match: ['polaroid', 'pol-'],
+    mockupUrl: '',
+    printArea: { x: 0.05, y: 0.05, w: 0.9, h: 0.778 },
+    physical: { widthMm: 69.916, heightMm: 91.44, bleedMm: 0, safeMm: 3 },
+    dpi: 300,
+    minSourcePx: 800,
+    maxImages: 20,
+    allowedTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'],
+    previewEnabled: true
   }
 ];
 

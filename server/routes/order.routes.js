@@ -8,6 +8,7 @@ const { generatePrintPdf, UPLOADS_DIR } = require('../utils/printRenderer');
 const { generateButterflyBoxPdf } = require('../utils/butterflyGenerator');
 const { allocateButterflyTemplate } = require('../services/butterflyAllocation.service');
 const { generateMagazinePdf } = require('../utils/magazineGenerator');
+const { generatePolaroidPdf } = require('../utils/polaroidGenerator');
 const { reconcileWorkflowStatus, derivePrintGenerationStatus, deriveDpiStatus } = require('../utils/orderStatus');
 const multer = require('multer');
 const sharp = require('sharp');
@@ -653,15 +654,17 @@ router.post('/:id/review', adminMiddleware, async (req, res) => {
 
     const isApproved = action === 'approve';
 
-    // Calculate current design hash
     const isButterfly = (existingOrder.productType || '').toLowerCase() === 'butterfly' || (existingOrder.product || '').toLowerCase().includes('butterfly');
     const isMagazine = (existingOrder.productType || '').toLowerCase() === 'magazine' || (existingOrder.product || '').toLowerCase().includes('magazine');
+    const isPolaroid = (existingOrder.productType || '').toLowerCase() === 'polaroid' || (existingOrder.product || '').toLowerCase().includes('polaroid') || (existingOrder.sku || '').toUpperCase().includes('PG-PP') || (existingOrder.sku || '').toUpperCase().includes('POLAROID');
     
     let templateId = '';
     if (isButterfly) {
       templateId = existingOrder.sku || existingOrder.productType || 'butterfly';
     } else if (isMagazine) {
       templateId = existingOrder.sku || existingOrder.productType || 'magazine';
+    } else if (isPolaroid) {
+      templateId = 'tpl-polaroid-20';
     } else {
       try {
         const { resolveTemplate } = require('../config/printTemplates');
@@ -748,6 +751,10 @@ router.post('/:id/review', adminMiddleware, async (req, res) => {
           const { generateMagazinePdf } = require('../utils/magazineGenerator');
           const file = await generateMagazinePdf({ orderId: existingOrder.id, images, order: existingOrder });
           printFiles.push({ ...file, isMagazine: true });
+        } else if (isPolaroid) {
+          const { generatePolaroidPdf } = require('../utils/polaroidGenerator');
+          const file = await generatePolaroidPdf({ orderId: existingOrder.id, images, order: existingOrder });
+          printFiles.push({ ...file, isPolaroid: true });
         } else {
           const { generatePrintPdf } = require('../utils/printRenderer');
           const { fromLegacyImage } = require('../utils/designTransform');
@@ -907,6 +914,7 @@ router.post('/:id/regenerate', adminMiddleware, async (req, res) => {
     const failures = [];
     const isButterfly = (order.productType || '').toLowerCase() === 'butterfly' || (order.product || '').toLowerCase().includes('butterfly');
     const isMagazine = (order.productType || '').toLowerCase() === 'magazine' || (order.product || '').toLowerCase().includes('magazine');
+    const isPolaroid = (order.productType || '').toLowerCase() === 'polaroid' || (order.product || '').toLowerCase().includes('polaroid') || (order.sku || '').toUpperCase().includes('PG-PP') || (order.sku || '').toUpperCase().includes('POLAROID');
     if (isButterfly) {
       try {
         const file = await generateButterflyBoxPdf({ orderId: order.id, images: order.images || [], order });
@@ -918,6 +926,13 @@ router.post('/:id/regenerate', adminMiddleware, async (req, res) => {
       try {
         const file = await generateMagazinePdf({ orderId: order.id, images: order.images || [], order });
         printFiles.push({ ...file, isMagazine: true });
+      } catch (err) {
+        failures.push({ error: err.message });
+      }
+    } else if (isPolaroid) {
+      try {
+        const file = await generatePolaroidPdf({ orderId: order.id, images: order.images || [], order });
+        printFiles.push({ ...file, isPolaroid: true });
       } catch (err) {
         failures.push({ error: err.message });
       }
@@ -1029,6 +1044,7 @@ router.post('/:id/submit-design', adminMiddleware, async (req, res) => {
 
     const isButterfly = (refreshed.productType || '').toLowerCase() === 'butterfly' || (refreshed.product || '').toLowerCase().includes('butterfly');
     const isMagazine = (refreshed.productType || '').toLowerCase() === 'magazine' || (refreshed.product || '').toLowerCase().includes('magazine');
+    const isPolaroid = (refreshed.productType || '').toLowerCase() === 'polaroid' || (refreshed.product || '').toLowerCase().includes('polaroid') || (refreshed.sku || '').toUpperCase().includes('PG-PP') || (refreshed.sku || '').toUpperCase().includes('POLAROID');
     if (isButterfly) {
       try {
         const file = await generateButterflyBoxPdf({ orderId: refreshed.id, images: refreshed.images || [], order: refreshed });
@@ -1040,6 +1056,13 @@ router.post('/:id/submit-design', adminMiddleware, async (req, res) => {
       try {
         const file = await generateMagazinePdf({ orderId: refreshed.id, images: refreshed.images || [], order: refreshed });
         printFiles.push({ ...file, isMagazine: true });
+      } catch (err) {
+        failures.push({ error: err.message });
+      }
+    } else if (isPolaroid) {
+      try {
+        const file = await generatePolaroidPdf({ orderId: refreshed.id, images: refreshed.images || [], order: refreshed });
+        printFiles.push({ ...file, isPolaroid: true });
       } catch (err) {
         failures.push({ error: err.message });
       }
@@ -1141,6 +1164,7 @@ router.post('/:id/force-approve', adminMiddleware, async (req, res) => {
       });
       const isButterfly = (order.productType || '').toLowerCase() === 'butterfly' || (order.product || '').toLowerCase().includes('butterfly');
       const isMagazine = (order.productType || '').toLowerCase() === 'magazine' || (order.product || '').toLowerCase().includes('magazine');
+      const isPolaroid = (order.productType || '').toLowerCase() === 'polaroid' || (order.product || '').toLowerCase().includes('polaroid');
       let extraUpdateData = {};
       if (isButterfly) {
         try {
@@ -1163,6 +1187,13 @@ router.post('/:id/force-approve', adminMiddleware, async (req, res) => {
           printFiles.push({ ...file, isMagazine: true });
         } catch (err) {
           console.error('[FORCE APPROVE RENDER ERROR]', id, err.message);
+        }
+      } else if (isPolaroid) {
+        try {
+          const file = await generatePolaroidPdf({ orderId: order.id, images: order.images || [], order });
+          printFiles.push({ ...file, isPolaroid: true });
+        } catch (err) {
+          console.error('[FORCE APPROVE POLAROID RENDER ERROR]', id, err.message);
         }
       } else {
         for (const img of order.images) {

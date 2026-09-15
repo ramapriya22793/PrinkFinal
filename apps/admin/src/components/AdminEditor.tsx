@@ -14,6 +14,7 @@ import { useToast } from '../context/ToastContext';
 import html2canvas from 'html2canvas';
 import { ButterflySheet } from './ButterflySheet';
 import { MagazineSheet } from './MagazineSheet';
+import { PolaroidSheet } from './PolaroidSheet';
 
 const PRINT_AREAS: Record<string, { x: number; y: number; width: number; height: number; }> = {
   'MUG-WHT-11OZ': { x: 125, y: 150, width: 250, height: 250 },
@@ -184,6 +185,8 @@ export default function AdminEditor({ order, onBack }: AdminEditorProps) {
   const [butterflyCrops, setButterflyCrops] = useState<Record<number, any>>({});
   const isButterfly = (o: any) => [o?.productType, o?.product, o?.sku].join(' ').toLowerCase().includes('butterfly');
   const isMagazine = (o: any) => [o?.productType, o?.product, o?.sku].join(' ').toLowerCase().includes('magazine');
+  const isPolaroid = (o: any) => [o?.productType, o?.product, o?.sku, o?.title, o?.name].join(' ').toLowerCase().includes('polaroid') || (o?.sku && String(o.sku).toUpperCase().includes('PG-PP'));
+  const isMultiPhotoSheet = (o: any) => isButterfly(o) || isMagazine(o) || isPolaroid(o);
 
   // Selected element helper
   const selectedItem = items.find(i => i.id === selectedId);
@@ -368,7 +371,8 @@ export default function AdminEditor({ order, onBack }: AdminEditorProps) {
         }
 
         const uploadedImgs = fetchedOrder.images;
-        if (!restored && uploadedImgs && uploadedImgs.length > 0) {
+        const isSheetProduct = isMultiPhotoSheet(fetchedOrder);
+        if (!restored && !isSheetProduct && uploadedImgs && uploadedImgs.length > 0) {
           const freshArea = getPrintArea(fetchedOrder.sku || '', fetchedOrder.productType || '');
           const isSingleImage = (fetchedOrder.skuDetails?.supportedImageCount === 1) || 
                                 ['mobilecase', 'mug', 'tshirt', 'frame', 'canvas', 'pillow', 'keychain']
@@ -546,7 +550,7 @@ export default function AdminEditor({ order, onBack }: AdminEditorProps) {
   // Save draft details (JSON auto-saved style)
   const saveDraft = async () => {
     try {
-      const isProductTemplate = (isButterfly(currentOrder) || isMagazine(currentOrder));
+      const isProductTemplate = isMultiPhotoSheet(currentOrder);
       const payloadData = isProductTemplate ? { butterflyCrops } : items;
 
       const res = await fetch(`/api/orders/${encodeURIComponent(currentOrder.id || currentOrder._id || currentOrder.orderNumber || "")}/design`, {
@@ -583,7 +587,7 @@ export default function AdminEditor({ order, onBack }: AdminEditorProps) {
       const orderId = encodeURIComponent(
         currentOrder.id || currentOrder._id || currentOrder.orderNumber || ''
       );
-      const isProductTemplate = isButterfly(currentOrder) || isMagazine(currentOrder);
+      const isProductTemplate = isMultiPhotoSheet(currentOrder);
       const payloadData = isProductTemplate ? { butterflyCrops } : items;
 
       // Send ONLY the design data as a small JSON body — no canvas image.
@@ -667,7 +671,7 @@ export default function AdminEditor({ order, onBack }: AdminEditorProps) {
           <button onClick={saveDraft} className="px-4 py-2 text-gray-600 font-medium hover:bg-gray-100 rounded-lg transition-colors flex items-center gap-2">
             <Save size={18} /> Save Draft
           </button>
-          {((isButterfly(currentOrder) || isMagazine(currentOrder))) && (
+          {isMultiPhotoSheet(currentOrder) && (
             <>
               {(!isReviewed && currentOrder.status !== 'completed' && currentOrder.status !== 'print-ready' && currentOrder.uploadStatus !== 'ready') && (
                 <>
@@ -726,6 +730,7 @@ export default function AdminEditor({ order, onBack }: AdminEditorProps) {
                         <body>
                           ${document.getElementById('butterfly-sheet-layout') ? document.getElementById('butterfly-sheet-layout')?.outerHTML : ''}
                           ${document.getElementById('magazine-sheet-layout') ? document.getElementById('magazine-sheet-layout')?.outerHTML : ''}
+                          ${document.getElementById('polaroid-sheet-layout') ? document.getElementById('polaroid-sheet-layout')?.outerHTML : ''}
                         </body>
                       </html>
                     `);
@@ -753,7 +758,7 @@ export default function AdminEditor({ order, onBack }: AdminEditorProps) {
       <div className="flex flex-1 overflow-hidden relative">
         
         {/* Left Toolbar tabs */}
-        {(!(isButterfly(currentOrder) || isMagazine(currentOrder)) || showTools) && (
+        {(!isMultiPhotoSheet(currentOrder) || showTools) && (
           <div className="w-80 bg-white border-r flex flex-col z-10 overflow-y-auto">
           <div className="flex border-b overflow-x-auto flex-wrap">
             {(['info', 'adjust', 'uploads', 'text', 'shapes', 'ai', 'layers'] as const).map(tab => (
@@ -1338,7 +1343,7 @@ export default function AdminEditor({ order, onBack }: AdminEditorProps) {
         )}
 
         {/* Center Canvas Area */}
-        <div className={`flex-1 overflow-auto bg-[#E5E7EB] relative ${!(isButterfly(currentOrder) || isMagazine(currentOrder)) ? 'flex flex-col items-center justify-center p-8' : 'p-8 flex'}`}>
+        <div className={`flex-1 overflow-auto bg-[#E5E7EB] relative ${!isMultiPhotoSheet(currentOrder) ? 'flex flex-col items-center justify-center p-8' : 'p-8 flex'}`}>
           
           {/* Overlays / Guides indicator */}
           <div className="absolute top-4 left-4 bg-white/90 backdrop-blur px-3 py-2 rounded-xl shadow-sm flex items-center gap-2 z-10 border border-gray-100">
@@ -1399,10 +1404,18 @@ export default function AdminEditor({ order, onBack }: AdminEditorProps) {
             </div>
           )}
 
-          <div className={`relative w-full h-full overflow-auto ${!(isButterfly(currentOrder) || isMagazine(currentOrder)) ? 'flex items-center justify-center' : 'flex'}`}>
-            {((isButterfly(currentOrder) || isMagazine(currentOrder))) ? (
+          <div className={`relative w-full h-full overflow-auto ${!isMultiPhotoSheet(currentOrder) ? 'flex items-center justify-center' : 'flex'}`}>
+            {isMultiPhotoSheet(currentOrder) ? (
               <div id="print-sheet-wrapper" style={{ zoom: scale, margin: 'auto', display: 'flex', justifyContent: 'center' }}>
-                {isMagazine(currentOrder) ? (
+                {isPolaroid(currentOrder) ? (
+                  <PolaroidSheet 
+                    images={(currentOrder.images && currentOrder.images.length > 0) ? currentOrder.images : []} 
+                    polaroidCrops={butterflyCrops || {}} 
+                    orderId={currentOrder.id || currentOrder._id || currentOrder.orderNumber}
+                    onSelectPhoto={(idx) => setEditingCropIdx(idx)}
+                    forPdf={isGenerating}
+                  />
+                ) : isMagazine(currentOrder) ? (
                   <MagazineSheet 
                     images={(currentOrder.images && currentOrder.images.length > 0) ? currentOrder.images : []} 
                     magazineCrops={butterflyCrops || {}} 
@@ -1643,7 +1656,7 @@ export default function AdminEditor({ order, onBack }: AdminEditorProps) {
         </div>
 
         {/* Right Sidebar: Checklists and resolution warnings */}
-        {(!(isButterfly(currentOrder) || isMagazine(currentOrder)) || showTools) && (
+        {(!isMultiPhotoSheet(currentOrder) || showTools) && (
           <div className="w-80 bg-white border-l p-5 flex flex-col gap-6 z-10 overflow-y-auto">
           <div>
             <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Production Quality Check</h3>
@@ -1749,6 +1762,26 @@ export default function AdminEditor({ order, onBack }: AdminEditorProps) {
                   className="w-full accent-indigo-600"
                 />
               </div>
+              {isPolaroid(currentOrder) && (
+                <div>
+                  <div className="flex justify-between mb-1">
+                    <label className="text-xs font-semibold text-gray-600 uppercase">Caption</label>
+                  </div>
+                  <input
+                    type="text"
+                    value={currentOrder.images?.[editingCropIdx]?.caption || ''}
+                    onChange={e => {
+                      const updatedImages = [...(currentOrder.images || [])];
+                      if (updatedImages[editingCropIdx]) {
+                        updatedImages[editingCropIdx] = { ...updatedImages[editingCropIdx], caption: e.target.value };
+                        setCurrentOrder({ ...currentOrder, images: updatedImages });
+                      }
+                    }}
+                    placeholder="Enter chin caption..."
+                    className="w-full text-xs p-2 border border-gray-200 rounded-lg focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              )}
             </div>
           </div>
         )}

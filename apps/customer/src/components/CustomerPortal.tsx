@@ -2198,7 +2198,7 @@ export default function CustomerPortal({
       tshirt: 'bi-file-person', mug: 'bi-cup-hot', mobilecase: 'bi-phone',
       frame: 'bi-aspect-ratio', pillow: 'bi-box', photobook: 'bi-book',
       keychain: 'bi-key', canvas: 'bi-image', calendar: 'bi-calendar3',
-      butterfly: 'bi-gift',
+      butterfly: 'bi-gift', polaroid: 'bi-camera', magazine: 'bi-journal-text',
     };
     return map[type] || 'bi-box';
   };

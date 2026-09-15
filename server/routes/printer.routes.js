@@ -211,6 +211,7 @@ router.get('/download/:id', printerAuth, async (req, res) => {
     const { generatePrintPdf } = require('../utils/printRenderer');
     const { generateButterflyBoxPdf } = require('../utils/butterflyGenerator');
     const { generateMagazinePdf } = require('../utils/magazineGenerator');
+    const { generatePolaroidPdf } = require('../utils/polaroidGenerator');
     const os = require('os');
     const isVercel = process.env.VERCEL === '1';
 
@@ -253,6 +254,7 @@ router.get('/download/:id', printerAuth, async (req, res) => {
 
         const isButterfly = (order.productType || '').toLowerCase() === 'butterfly' || (order.product || '').toLowerCase().includes('butterfly');
         const isMagazine = (order.productType || '').toLowerCase() === 'magazine' || (order.product || '').toLowerCase().includes('magazine');
+        const isPolaroid = (order.productType || '').toLowerCase() === 'polaroid' || (order.product || '').toLowerCase().includes('polaroid') || (order.sku || '').toUpperCase().includes('PG-PP') || (order.sku || '').toUpperCase().includes('POLAROID');
 
         let generatedFile = null;
 
@@ -260,6 +262,8 @@ router.get('/download/:id', printerAuth, async (req, res) => {
           generatedFile = await generateButterflyBoxPdf({ orderId: order.id, images: order.images || [], order });
         } else if (isMagazine) {
           generatedFile = await generateMagazinePdf({ orderId: order.id, images: order.images || [], order });
+        } else if (isPolaroid) {
+          generatedFile = await generatePolaroidPdf({ orderId: order.id, images: order.images || [], order });
         } else {
           const img = (order.images || [])[0];
           if (img) {

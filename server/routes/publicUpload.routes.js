@@ -431,9 +431,12 @@ router.post('/order/:token/confirm', uploadLimiter, requireUploadToken, async (r
 
     // 1. Calculate design hash to check for cache hits
     const isButterfly = (claim.productType || '').toLowerCase() === 'butterfly' || (claim.product || '').toLowerCase().includes('butterfly');
+    const isPolaroid = (claim.productType || '').toLowerCase() === 'polaroid' || (claim.product || '').toLowerCase().includes('polaroid') || (claim.sku || '').toUpperCase().includes('PG-PP') || (claim.sku || '').toUpperCase().includes('POLAROID');
     let templateId = '';
     if (isButterfly) {
       templateId = claim.sku || claim.productType || 'butterfly';
+    } else if (isPolaroid) {
+      templateId = 'tpl-polaroid-20';
     } else {
       try {
         const template = await templateForOrder(claim);
@@ -505,6 +508,23 @@ router.post('/order/:token/confirm', uploadLimiter, requireUploadToken, async (r
             }
           });
           return { printFiles: result.printFiles, failures: [] };
+        } else if (isPolaroid) {
+          const { generatePolaroidPdf } = require('../utils/polaroidGenerator');
+          const file = await generatePolaroidPdf({ orderId: claim.id, images, order: claim });
+          const printFiles = [{ ...file, isPolaroid: true }];
+          await Order.updateOne({ id: order.id }, {
+            $set: {
+              printFiles,
+              templateId: 'tpl-polaroid-20',
+              pdfUrl: file.url,
+              printGenerationStatus: 'completed',
+              adminApprovalStatus: 'pending',
+              orderStatus: 'Pending'
+            }
+          });
+          await db.addActivityLog(order.id, 'PDF_GENERATED', `Polaroid print sheet generated for ${order.id}.`);
+          console.log(`[WORKFLOW LOG] Polaroid PDF Generated for Order ${order.id}: SUCCESS`);
+          return { printFiles, failures: [] };
         } else {
           const template = await templateForOrder(claim);
           const printFiles = [];
