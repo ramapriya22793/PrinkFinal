@@ -103,15 +103,21 @@ export const isCustomizable = (o: any) => {
 
 export const getRequiredPhotoCount = (o: any): number => {
   if (!o || !isCustomizable(o)) return 0;
+  const t = (o.productType || '').toLowerCase();
+  const p = (o.product || '').toLowerCase();
+  const s = (o.sku || '').toLowerCase();
+  if (t.includes('polaroid') || p.includes('polaroid') || s.includes('pg-pp') || s.includes('polaroid')) {
+    return (typeof o.requiredPhotoCount === 'number' && o.requiredPhotoCount > 1) ? o.requiredPhotoCount : 20;
+  }
   if (typeof o.requiredPhotoCount === 'number' && o.requiredPhotoCount >= 0) {
     return o.requiredPhotoCount;
   }
   const photoCountByType: Record<string, number> = {
     butterfly: 8, magazine: 4, photobook: 24,
     calendar: 12, frame: 4, mug: 1, tshirt: 1,
-    mobilecase: 1, pillow: 1, keychain: 2, canvas: 1
+    mobilecase: 1, pillow: 1, keychain: 2, canvas: 1,
+    polaroid: 20
   };
-  const t = (o.productType || '').toLowerCase();
   return photoCountByType[t] || 1;
 };
 
@@ -975,6 +981,15 @@ export default function CustomerPortal({
       qualityRecommendation: 'Requires 8 photos for complete 3D exploding box flaps.',
       safePrintArea: { x: 5, y: 5, width: 90, height: 90 },
       imagePlacementArea: { x: 5, y: 5, width: 90, height: 90 },
+      requiresPreview: true
+    },
+    polaroid: {
+      productType: 'polaroid',
+      width: '2.75"', height: '3.60"', pixelWidth: 825, pixelHeight: 1080, cropRatio: 0.778,
+      supportedFormats: ['PNG', 'JPG', 'WEBP', 'HEIC'],
+      qualityRecommendation: 'Upload 20 photos for the complete 20-in-1 Polaroid print sheet.',
+      safePrintArea: { x: 5, y: 5, width: 90, height: 90 },
+      imagePlacementArea: { x: 0, y: 0, width: 100, height: 78 },
       requiresPreview: true
     }
   };
@@ -1891,6 +1906,7 @@ export default function CustomerPortal({
       canvas: 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=120&auto=format&fit=crop&q=60',
       calendar: 'https://images.unsplash.com/photo-1506784983877-45594efa4cbe?w=120&auto=format&fit=crop&q=60',
       butterfly: 'https://images.unsplash.com/photo-1549465220-1a8b9238cd48?w=120&auto=format&fit=crop&q=60',
+      polaroid: 'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=120&auto=format&fit=crop&q=60',
     };
     return fallbacks[order.productType || 'canvas'] || fallbacks.canvas;
   };
