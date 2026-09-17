@@ -9,11 +9,120 @@ const { UPLOADS_DIR, PRINT_DIR, ensureDirs, resolveOriginalImageSource } = requi
 const mmToPt = (mm) => (mm / 25.4) * 72;
 
 /**
+ * Technical Blueprint Specifications for Butterfly Box (13 x 19 inch sheet):
+ * Sheet Size: 330.20 mm x 482.60 mm
+ * Safe Margin (Red Box): 320.20 mm x 460.10 mm (offset: x = 5.00 mm, y = 17.45 mm)
+ * 
+ * Product 1 (Blue lines - Order 1):
+ * - 4 Small photos (73 x 73 mm) across the top row:
+ *   [ { x: 13.10, y: 36.60 }, { x: 90.10, y: 36.60 }, { x: 167.10, y: 36.60 }, { x: 244.10, y: 36.60 } ]
+ * - 4 Large photos (81 x 81 mm) down the left column:
+ *   [ { x: 13.10, y: 132.60 }, { x: 13.10, y: 217.60 }, { x: 13.10, y: 302.60 }, { x: 13.10, y: 387.60 } ]
+ * - Barcode Box: x = 98.78 mm, y = 116.60 mm, w = 52.92 mm, h = 12.50 mm
+ * 
+ * Product 2 (Red lines - Order 2):
+ * - 4 Large photos (81 x 81 mm) down the middle column:
+ *   [ { x: 159.10, y: 132.60 }, { x: 159.10, y: 217.60 }, { x: 159.10, y: 302.60 }, { x: 159.10, y: 387.60 } ]
+ * - 4 Small photos (73 x 73 mm) down the right column:
+ *   [ { x: 244.10, y: 164.60 }, { x: 244.10, y: 241.60 }, { x: 244.10, y: 318.60 }, { x: 244.10, y: 395.60 } ]
+ * - Barcode Box: x = 252.58 mm, y = 130.53 mm, w = 52.89 mm, h = 12.50 mm
+ */
+const PAGE_WIDTH_MM = 330.20;
+const PAGE_HEIGHT_MM = 482.60;
+const SAFE_OFFSET_X = 5.00;
+const SAFE_OFFSET_Y = 17.45;
+const SAFE_WIDTH_MM = 320.20;
+const SAFE_HEIGHT_MM = 460.10;
+
+const p1_small = [
+  { x: 13.10, y: 36.60 },
+  { x: 90.10, y: 36.60 },
+  { x: 167.10, y: 36.60 },
+  { x: 244.10, y: 36.60 }
+];
+
+const p1_large = [
+  { x: 13.10, y: 132.60 },
+  { x: 13.10, y: 217.60 },
+  { x: 13.10, y: 302.60 },
+  { x: 13.10, y: 387.60 }
+];
+
+const p2_large = [
+  { x: 159.10, y: 132.60 },
+  { x: 159.10, y: 217.60 },
+  { x: 159.10, y: 302.60 },
+  { x: 159.10, y: 387.60 }
+];
+
+const p2_small = [
+  { x: 244.10, y: 164.60 },
+  { x: 244.10, y: 241.60 },
+  { x: 244.10, y: 318.60 },
+  { x: 244.10, y: 395.60 }
+];
+
+const p1_barcode = { x: 98.78, y: 116.60, w: 52.92, h: 12.50 };
+const p2_barcode = { x: 252.58, y: 130.53, w: 52.89, h: 12.50 };
+
+/**
+ * Draw vector Code-128 style barcode simulation pattern inside barcode box
+ */
+function drawVectorBarcode(doc, xMm, yMm, wMm, hMm) {
+  const xPt = mmToPt(xMm);
+  const yPt = mmToPt(yMm);
+  const wPt = mmToPt(wMm);
+  const hPt = mmToPt(hMm);
+
+  const padX = mmToPt(1.5);
+  const padY = mmToPt(1.5);
+  const innerH = hPt - (padY * 2);
+
+  const barPattern = [
+    2, 1, 1, 3, 1, 2, 1, 1, 2, 3, 1, 1, 2, 1, 3, 1, 1, 2, 1, 1, 3, 2, 1, 1,
+    2, 2, 1, 1, 1, 3, 2, 1, 3, 1, 1, 2, 1, 1, 2, 2, 3, 1, 1, 2, 1, 3, 2, 1,
+    1, 3, 1, 2, 2, 1, 1, 2, 3, 1, 2, 1, 1, 1, 3, 2, 1, 2, 2, 1, 1, 3, 1, 2
+  ];
+
+  let curX = xPt + padX;
+  const startY = yPt + padY;
+  doc.fillColor('#000000');
+
+  for (let i = 0; i < barPattern.length; i++) {
+    const w = barPattern[i] * 0.52;
+    if (curX + w > xPt + wPt - padX) break;
+    doc.rect(curX, startY, w, innerH).fill();
+    curX += w + (i % 2 === 0 ? 0.75 : 0.5);
+  }
+}
+
+/**
+ * Draw registration and trim marks matching technical blueprint
+ */
+function drawRegistrationMarks(doc) {
+  // Bottom-Left L-mark (x=5.00, y=477.60)
+  doc.rect(mmToPt(5.00), mmToPt(457.60), mmToPt(1.00), mmToPt(20.00)).fill('#18181b');
+  doc.rect(mmToPt(5.00), mmToPt(476.60), mmToPt(20.00), mmToPt(1.00)).fill('#18181b');
+
+  // Bottom-Right L-mark (x=325.20, y=477.60)
+  doc.rect(mmToPt(324.20), mmToPt(457.60), mmToPt(1.00), mmToPt(20.00)).fill('#18181b');
+  doc.rect(mmToPt(305.20), mmToPt(476.60), mmToPt(20.00), mmToPt(1.00)).fill('#18181b');
+
+  // Left Margin T-mark (x=5.00, y=64.00)
+  doc.rect(mmToPt(5.00), mmToPt(55.00), mmToPt(1.00), mmToPt(20.00)).fill('#18181b');
+  doc.rect(mmToPt(5.00), mmToPt(64.00), mmToPt(5.00), mmToPt(1.00)).fill('#18181b');
+
+  // Right Margin T-mark (x=325.20, y=64.00)
+  doc.rect(mmToPt(324.20), mmToPt(55.00), mmToPt(1.00), mmToPt(20.00)).fill('#18181b');
+  doc.rect(mmToPt(320.20), mmToPt(64.00), mmToPt(5.00), mmToPt(1.00)).fill('#18181b');
+}
+
+/**
  * Generate a Print-Ready PDF for the Butterfly Box layout.
  * 
  * @param {Object} options 
  * @param {string} options.orderId - The Order ID
- * @param {Array<Object>} options.images - Array of 8 image objects (each having url/serverFilename/originalKey)
+ * @param {Array<Object>} options.images - Array of 8 image objects
  * @param {Object} options.order - Full order object with customer and product details
  * @param {string} [options.orderId2] - The second Order ID (for the Red side)
  * @param {Array<Object>} [options.images2] - Array of 8 image objects for the second order
@@ -28,21 +137,14 @@ async function generateButterflyBoxPdf({ orderId, images, order, orderId2, image
     throw new Error('Butterfly Box requires at least 1 image.');
   }
 
-  // If there are fewer than 8 images (e.g., old test orders), duplicate them to fill all 8 slots
+  // If there are fewer than 8 images, duplicate them to fill all 8 slots
   let paddedImages = [...images];
   while (paddedImages.length < 8) {
     paddedImages.push(images[paddedImages.length % images.length]);
   }
-  // If there are more than 8, slice to 8
   paddedImages = paddedImages.slice(0, 8);
 
   const getImgKey = (img) => img.id || img.url || img.serverFilename || JSON.stringify(img);
-
-  // Every original image this call couldn't resolve (local disk, S3, and
-  // GridFS all missed) gets a grey placeholder so the layout still renders -
-  // but the caller MUST know this happened. A placeholder-filled PDF is not
-  // a real print file, and reporting printGenerationStatus:'completed' for
-  // one silently ships an order with blank photos. See missingImageCount.
   let missingImageCount = 0;
 
   // Helper to process a set of padded images by only rendering unique ones
@@ -57,35 +159,33 @@ async function generateButterflyBoxPdf({ orderId, images, order, orderId2, image
       }
     }
 
-    const uniqueBuffers = await Promise.all(uniqueList.map(async (img) => {
-      // Always load the original high-resolution image to ensure professional print quality!
+    const uniqueResults = await Promise.all(uniqueList.map(async (img) => {
       const src = await resolveOriginalImageSource(img);
 
       if (!src) {
         console.warn(`[WARNING] Could not find original file for image ${img.id || 'unknown'}. Using placeholder.`);
         missingImageCount++;
-        return await require('sharp')({
-          create: { width: 1000, height: 1000, channels: 4, background: { r: 230, g: 230, b: 230, alpha: 1 } }
+        const placeholderBuf = await sharp({
+          create: { width: 1000, height: 1000, channels: 4, background: { r: 240, g: 243, b: 246, alpha: 1 } }
         }).jpeg({ quality: 90 }).toBuffer();
+        return { buffer: placeholderBuf, width: 1000, height: 1000, isPlaceholder: true };
       }
 
-      // Auto-orient based on EXIF and output high-quality JPEG (no down-scaling)
-      return await sharp(src)
-        .rotate()
-        .jpeg({ quality: 95 })
-        .toBuffer();
+      // Auto-orient based on EXIF and inspect metadata for exact aspect ratio preservation
+      const rotated = sharp(src).rotate();
+      const meta = await rotated.metadata();
+      const buf = await rotated.jpeg({ quality: 95 }).toBuffer();
+      return { buffer: buf, width: meta.width || 1000, height: meta.height || 1000, isPlaceholder: false };
     }));
 
     uniqueList.forEach((img, index) => {
       const key = getImgKey(img);
-      uniqueMap.set(key, uniqueBuffers[index]);
+      uniqueMap.set(key, uniqueResults[index]);
     });
 
     return imgs.map(img => uniqueMap.get(getImgKey(img)));
   };
 
-  // Pre-process all 8 images
-  // This avoids placing 10MB original JPEGs directly into the PDF, keeping the PDF size manageable.
   const processedBuffers = await processImagesList(paddedImages);
 
   let butterflyCrops = {};
@@ -123,13 +223,6 @@ async function generateButterflyBoxPdf({ orderId, images, order, orderId2, image
     processedBuffers2 = await processImagesList(paddedImages2);
   }
 
-  const PAGE_WIDTH_MM = 330.2;
-  const PAGE_HEIGHT_MM = 482.6;
-  const SAFE_WIDTH_MM = 320.2;
-  const SAFE_HEIGHT_MM = 460.1;
-  const SAFE_OFFSET_X = 5;
-  const SAFE_OFFSET_Y = 11.25;
-
   const pageW = mmToPt(PAGE_WIDTH_MM);
   const pageH = mmToPt(PAGE_HEIGHT_MM);
 
@@ -138,9 +231,6 @@ async function generateButterflyBoxPdf({ orderId, images, order, orderId2, image
   const outputPath = path.join(PRINT_DIR, filename);
 
   return new Promise((resolve, reject) => {
-    // Single composite print sheet only (custom 13x19in). The A4 "job
-    // ticket" cover page was dropped per client feedback — the printer
-    // just needs the artwork, not the order/QC summary page.
     const doc = new PDFDocument({
       size: [pageW, pageH],
       margin: 0,
@@ -154,217 +244,142 @@ async function generateButterflyBoxPdf({ orderId, images, order, orderId2, image
     doc.pipe(stream);
 
     // =========================================================================
-    // COMPOSITE PRINT SHEET (Custom 13x19 inch) — the only page
+    // COMPOSITE PRINT SHEET (Custom 13x19 inch) — 330.2 x 482.6 mm
     // =========================================================================
     doc.rect(0, 0, pageW, pageH).fill('#ffffff');
 
-    // 3. Define Image Coordinates (in mm)
-    // Product 1 (Blue)
-    const p1_small = [
-      { x: 14, y: 22.35 },
-      { x: 93, y: 22.35 },
-      { x: 172, y: 22.35 },
-      { x: 251, y: 22.35 }
-    ];
-    const p1_large = [
-      { x: 14, y: 118.35 },
-      { x: 14, y: 209.01 },
-      { x: 14, y: 299.67 },
-      { x: 14, y: 390.33 }
-    ];
-
-    // Product 2 (Red)
-    const p2_large = [
-      { x: 160, y: 118.35 },
-      { x: 160, y: 209.01 },
-      { x: 160, y: 299.67 },
-      { x: 160, y: 390.33 }
-    ];
-    const p2_small = [
-      { x: 251, y: 150.37 },
-      { x: 251, y: 233.03 },
-      { x: 251, y: 315.69 },
-      { x: 251, y: 398.35 }
-    ];
-
-    // 1. Draw Green Cut Line
-    doc.lineWidth(1).strokeColor('green')
+    // 1. Draw Green Cut Line (exact sheet boundary)
+    doc.lineWidth(1.5).strokeColor('#00963f')
        .rect(0, 0, pageW, pageH)
        .stroke();
 
-    // 2. Draw Red Safe Margin
-    doc.lineWidth(1).strokeColor('red')
+    // 2. Draw Red Safe Margin (320.20 x 460.10 mm at offset 5.00, 17.45 mm)
+    doc.lineWidth(1.0).strokeColor('#e3000f')
        .rect(mmToPt(SAFE_OFFSET_X), mmToPt(SAFE_OFFSET_Y), mmToPt(SAFE_WIDTH_MM), mmToPt(SAFE_HEIGHT_MM))
        .stroke();
 
-    // Product Sizes (each is 81x81mm which is ~229.6 pt)
-    const sizePt = 81 * 72 / 25.4; // 229.6 pt
-    const p1X = 50;
-    const p2X = pageW - 50 - sizePt; // 332.4 pt
-    const pY = 160;
+    // 3. Draw Registration / Trim Marks
+    drawRegistrationMarks(doc);
 
-    // Draw Product Headers
-    doc.lineWidth(2);
-    doc.strokeColor('#3b82f6'); // Blue color
-    doc.font('Helvetica-Bold').fontSize(10);
-    doc.fillColor('#3b82f6').text('PRODUCT 1', p1X, pY - 15);
-    doc.fillColor('#ef4444').text('PRODUCT 2', p2X, pY - 15);
+    // 4. Helper to draw boxes + images with full crop transforms
+    const placeImages = (coords, imgDataList, sizeMm, strokeColor, imgMetaList, cropsMap, startIndex = 0) => {
+      coords.forEach((coord, i) => {
+        const slotIdx = startIndex + i;
+        const xPt = mmToPt(coord.x);
+        const yPt = mmToPt(coord.y);
+        const sizePt = mmToPt(sizeMm);
 
-    // Helper to draw the full 81x81mm product photo
-    const drawProductPhoto = (imgIndex, x, y) => {
-      // Draw crop border
-      doc.lineWidth(0.5).strokeColor('#e2e8f0');
-      doc.rect(x, y, sizePt, sizePt).stroke();
+        const imgData = imgDataList && imgDataList[i];
+        const imgObj = imgMetaList && imgMetaList[i];
 
-      if (paddedImages[imgIndex] && processedBuffers[imgIndex]) {
-        try {
-          doc.save();
-          doc.rect(x, y, sizePt, sizePt).clip();
+        // Draw white card background
+        doc.fillColor('#ffffff').rect(xPt, yPt, sizePt, sizePt).fill();
+
+        if (imgData && imgData.buffer && !imgData.isPlaceholder) {
+          const crop = (cropsMap && (cropsMap[imgObj?.id] || cropsMap[slotIdx])) || imgObj?.transform || { scale: 1, x: 0, y: 0, rotation: 0 };
+          const imgW = imgData.width || imgObj?.width || sizePt;
+          const imgH = imgData.height || imgObj?.height || sizePt;
+          const aspect = imgW / imgH;
 
           let drawW = sizePt;
           let drawH = sizePt;
           let dx = 0;
           let dy = 0;
-          
-          const imgObj = paddedImages[imgIndex];
-          const crop = butterflyCrops[imgObj.id] || imgObj.transform || { scale: 1, x: 0, y: 0 };
 
-          if (imgObj.width && imgObj.height) {
-            const aspect = imgObj.width / imgObj.height;
-            if (aspect > 1) {
-              drawW = sizePt * aspect;
-              dx = (sizePt - drawW) / 2;
-            } else {
-              drawH = sizePt / aspect;
-              dy = (sizePt - drawH) / 2;
-            }
+          if (aspect > 1) {
+            drawW = sizePt * aspect;
+            dx = (sizePt - drawW) / 2;
+          } else {
+            drawH = sizePt / aspect;
+            dy = (sizePt - drawH) / 2;
           }
 
           const scale = crop.scale || 1;
-          const tx = (crop.x || 0) * (sizePt / 240); // Normalise the frontend px coords
+          const tx = (crop.x || 0) * (sizePt / 240);
           const ty = (crop.y || 0) * (sizePt / 240);
 
           const finalW = drawW * scale;
           const finalH = drawH * scale;
-          
-          const finalX = x + dx - (finalW - drawW) / 2 + tx;
-          const finalY = y + dy - (finalH - drawH) / 2 + ty;
+          const finalX = xPt + dx - (finalW - drawW) / 2 + tx;
+          const finalY = yPt + dy - (finalH - drawH) / 2 + ty;
 
-          doc.image(processedBuffers[imgIndex], finalX, finalY, {
-            width: finalW,
-            height: finalH
-          });
+          try {
+            doc.save();
+            doc.rect(xPt, yPt, sizePt, sizePt).clip();
 
-          doc.restore();
-        } catch (e) {
-          console.error('[PDF GENERATOR] Error rendering butterfly photo:', e.message);
+            if (crop.rotation) {
+              const centerX = xPt + sizePt / 2;
+              const centerY = yPt + sizePt / 2;
+              doc.rotate(crop.rotation, { origin: [centerX, centerY] });
+            }
+
+            doc.image(imgData.buffer, finalX, finalY, {
+              width: finalW,
+              height: finalH
+            });
+            doc.restore();
+          } catch (err) {
+            console.error('[PDF GENERATOR] Error rendering butterfly photo:', err.message);
+            doc.image(imgData.buffer, xPt, yPt, { width: sizePt, height: sizePt });
+          }
+        } else if (imgData && imgData.isPlaceholder) {
+          doc.fillColor('#cbd5e1').font('Helvetica').fontSize(7).text(`[Photo ${slotIdx + 1}]`, xPt + mmToPt(5), yPt + (sizePt / 2) - 4);
         }
-      } else {
-        // Placeholder if missing
-        doc.fillColor('#f8fafc').rect(x + 1, y + 1, sizePt - 2, sizePt - 2).fill();
-        doc.fillColor('#cbd5e1').font('Helvetica').fontSize(6).text(`[Photo ${imgIndex + 1}]`, x + 10, y + 50);
-      }
-    };
 
-    // Helper to draw boxes + images with full crop transforms
-    const placeImages = (coords, buffers, size, strokeColor, imgMetaList, cropsMap) => {
-      coords.forEach((coord, i) => {
-        const xPt = mmToPt(coord.x);
-        const yPt = mmToPt(coord.y);
-        const sizePt = mmToPt(size);
-
-        // Draw border
-        doc.lineWidth(1).strokeColor(strokeColor)
+        // Draw border matching technical blueprint (2.5 pt for 81mm, 2.0 pt for 73mm)
+        const borderWidth = sizeMm === 81 ? 2.5 : 2.0;
+        doc.lineWidth(borderWidth).strokeColor(strokeColor)
            .rect(xPt, yPt, sizePt, sizePt)
            .stroke();
-
-        // Place image inside border
-        if (buffers[i]) {
-          const imgObj = imgMetaList && imgMetaList[i];
-          if (imgObj) {
-            const crop = (cropsMap && cropsMap[imgObj.id]) || imgObj.transform || { scale: 1, x: 0, y: 0 };
-            
-            let drawW = sizePt;
-            let drawH = sizePt;
-            let dx = 0;
-            let dy = 0;
-            
-            if (imgObj.width && imgObj.height) {
-              const aspect = imgObj.width / imgObj.height;
-              if (aspect > 1) {
-                drawW = sizePt * aspect;
-                dx = (sizePt - drawW) / 2;
-              } else {
-                drawH = sizePt / aspect;
-                dy = (sizePt - drawH) / 2;
-              }
-            }
-
-            const scale = crop.scale || 1;
-            const tx = (crop.x || 0) * (sizePt / 240); // Normalise the frontend px coords
-            const ty = (crop.y || 0) * (sizePt / 240);
-
-            const finalW = drawW * scale;
-            const finalH = drawH * scale;
-            
-            const finalX = xPt + dx - (finalW - drawW) / 2 + tx;
-            const finalY = yPt + dy - (finalH - drawH) / 2 + ty;
-
-            try {
-              doc.save();
-              doc.rect(xPt, yPt, sizePt, sizePt).clip();
-              doc.image(buffers[i], finalX, finalY, {
-                width: finalW,
-                height: finalH
-              });
-              doc.restore();
-            } catch (err) {
-              console.error('[PDF GENERATOR] Error rendering placed image:', err.message);
-              // Fallback without crop if clip fails
-              doc.image(buffers[i], xPt, yPt, { width: sizePt, height: sizePt });
-            }
-          } else {
-            // No metadata, draw as-is
-            doc.image(buffers[i], xPt, yPt, { width: sizePt, height: sizePt });
-          }
-        }
       });
     };
 
-    // We have 8 images. Let's assign images 0-3 to large, 4-7 to small.
+    // Product 1 (Blue lines - Order 1)
+    // Photos 0..3 -> 4 Large (81x81mm), Photos 4..7 -> 4 Small (73x73mm)
     const largeImgs = processedBuffers.slice(0, 4);
     const smallImgs = processedBuffers.slice(4, 8);
+    placeImages(p1_large, largeImgs, 81, '#0000ff', paddedImages.slice(0, 4), butterflyCrops, 0);
+    placeImages(p1_small, smallImgs, 73, '#0000ff', paddedImages.slice(4, 8), butterflyCrops, 4);
 
-    // Product 1 (Blue lines)
-    placeImages(p1_large, largeImgs, 81, 'blue', paddedImages.slice(0, 4), butterflyCrops);
-    placeImages(p1_small, smallImgs, 73, 'blue', paddedImages.slice(4, 8), butterflyCrops);
+    // Product 1 Barcode Box (52.92 x 12.50 mm)
+    doc.lineWidth(2.0).strokeColor('#0000ff')
+       .rect(mmToPt(p1_barcode.x), mmToPt(p1_barcode.y), mmToPt(p1_barcode.w), mmToPt(p1_barcode.h))
+       .stroke();
+    drawVectorBarcode(doc, p1_barcode.x, p1_barcode.y, p1_barcode.w, p1_barcode.h);
 
-    // Product 2 (Red lines)
-    if (processedBuffers2.length === 8) {
-      const largeImgs2 = processedBuffers2.slice(0, 4);
-      const smallImgs2 = processedBuffers2.slice(4, 8);
-      placeImages(p2_large, largeImgs2, 81, 'red', paddedImages2.slice(0, 4), butterflyCrops2);
-      placeImages(p2_small, smallImgs2, 73, 'red', paddedImages2.slice(4, 8), butterflyCrops2);
+    // Product 1 Order ID Text (above column per blueprint)
+    const order1Num = order?.orderNumber || (orderId ? String(orderId).replace(/[^0-9]/g, '').slice(-6) || String(orderId).slice(-6) : '000001');
+    const order1Label = `Bt ${order1Num}`;
+    doc.fillColor('#000000').font('Helvetica-Bold').fontSize(9.5);
+    doc.text(order1Label, mmToPt(16.63), mmToPt(120.00), { lineBreak: false });
+    doc.text(order1Label, mmToPt(65.00), mmToPt(120.00), { lineBreak: false });
+
+    // Product 2 (Red lines - Order 2)
+    // Photos 0..3 -> 4 Large (81x81mm), Photos 4..7 -> 4 Small (73x73mm)
+    const hasOrder2 = processedBuffers2.length === 8;
+    const largeImgs2 = hasOrder2 ? processedBuffers2.slice(0, 4) : [];
+    const smallImgs2 = hasOrder2 ? processedBuffers2.slice(4, 8) : [];
+    placeImages(p2_large, largeImgs2, 81, '#ff0000', paddedImages2.slice(0, 4), butterflyCrops2, 0);
+    placeImages(p2_small, smallImgs2, 73, '#ff0000', paddedImages2.slice(4, 8), butterflyCrops2, 4);
+
+    // Product 2 Barcode Box (52.89 x 12.50 mm)
+    doc.lineWidth(2.0).strokeColor('#ff0000')
+       .rect(mmToPt(p2_barcode.x), mmToPt(p2_barcode.y), mmToPt(p2_barcode.w), mmToPt(p2_barcode.h))
+       .stroke();
+
+    if (orderId2 || hasOrder2) {
+      drawVectorBarcode(doc, p2_barcode.x, p2_barcode.y, p2_barcode.w, p2_barcode.h);
+      const order2Num = order2?.orderNumber || (orderId2 ? String(orderId2).replace(/[^0-9]/g, '').slice(-6) || String(orderId2).slice(-6) : '000002');
+      const order2Label = `Bt ${order2Num}`;
+      doc.fillColor('#000000').font('Helvetica-Bold').fontSize(9.5);
+      doc.text(order2Label, mmToPt(245.87), mmToPt(150.00), { lineBreak: false });
+      doc.text(order2Label, mmToPt(285.00), mmToPt(150.00), { lineBreak: false });
     }
-
-    // 4. Barcode / Order ID
-    doc.fillColor('black').font('Helvetica-Bold').fontSize(8);
-    // Left Blue block text
-    doc.text(`Bt: ${orderId}`, mmToPt(14), mmToPt(106.85));
-    // Middle Red block text
-    doc.text(`Bt: ${orderId2 || ''}`, mmToPt(160), mmToPt(106.85));
-    // Right Red block text
-    doc.text(`Bt: ${orderId2 || ''}`, mmToPt(251), mmToPt(140));
 
     doc.end();
 
     stream.on('finish', async () => {
       const stats = fs.statSync(outputPath);
-      // S3 is the only persistent store - a print file that only exists in
-      // this ephemeral temp dir is effectively lost, so treat a failed save
-      // as a failed generation rather than reporting success. The local
-      // copy is deliberately kept (not unlinked) after a successful upload -
-      // see server/utils/printRenderer.js's generatePrintPdf for why.
       try {
         const { saveToS3 } = require('./s3Storage');
         await saveToS3(`print/${filename}`, outputPath);
@@ -385,10 +400,6 @@ async function generateButterflyBoxPdf({ orderId, images, order, orderId2, image
         colourSpace: 'RGB',
         templateId: 'butterfly-box',
         generatedAt: new Date(),
-        // How many of the customer's actual photos could NOT be resolved
-        // (local disk, S3 and GridFS all missed) and were rendered as grey
-        // placeholders instead. A generated file with missingImages > 0 is
-        // not a real print file - callers must not treat it as 'completed'.
         missingImages: missingImageCount,
         totalImages: images.length + (images2?.length || 0)
       });
@@ -401,5 +412,3 @@ async function generateButterflyBoxPdf({ orderId, images, order, orderId2, image
 module.exports = {
   generateButterflyBoxPdf
 };
-
-

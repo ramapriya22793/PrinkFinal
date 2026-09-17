@@ -259,7 +259,33 @@ router.get('/download/:id', printerAuth, async (req, res) => {
         let generatedFile = null;
 
         if (isButterfly) {
-          generatedFile = await generateButterflyBoxPdf({ orderId: order.id, images: order.images || [], order });
+          let o1 = order;
+          let o2 = null;
+          let imgs1 = order.images || [];
+          let imgs2 = undefined;
+          if (order.linkedOrderId) {
+            const Order = require('../models/Order');
+            const linked = await Order.findOne({ id: order.linkedOrderId });
+            if (linked) {
+              if (order.templateSide === 'RED') {
+                o1 = linked;
+                o2 = order;
+                imgs1 = linked.images || [];
+                imgs2 = order.images || [];
+              } else {
+                o2 = linked;
+                imgs2 = linked.images || [];
+              }
+            }
+          }
+          generatedFile = await generateButterflyBoxPdf({
+            orderId: o1.id,
+            images: imgs1,
+            order: o1,
+            orderId2: o2?.id,
+            images2: imgs2,
+            order2: o2
+          });
         } else if (isMagazine) {
           generatedFile = await generateMagazinePdf({ orderId: order.id, images: order.images || [], order });
         } else if (isPolaroid) {

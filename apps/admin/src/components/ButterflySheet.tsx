@@ -16,29 +16,30 @@ interface ButterflySheetProps {
 }
 
 export const ButterflySheet: React.FC<ButterflySheetProps> = ({ images, butterflyCrops, orderId, onSelectPhoto, forPdf }) => {
+  // Exact Technical Blueprint Coordinates (in mm)
   const p1_small = [
-    { x: 9, y: 14 },
-    { x: 84, y: 14 },
-    { x: 159, y: 14 },
-    { x: 234, y: 14 }
+    { x: 13.10, y: 36.60 },
+    { x: 90.10, y: 36.60 },
+    { x: 167.10, y: 36.60 },
+    { x: 244.10, y: 36.60 }
   ];
   const p1_large = [
-    { x: 9, y: 100 },
-    { x: 9, y: 183 },
-    { x: 9, y: 266 },
-    { x: 9, y: 349 }
+    { x: 13.10, y: 132.60 },
+    { x: 13.10, y: 217.60 },
+    { x: 13.10, y: 302.60 },
+    { x: 13.10, y: 387.60 }
   ];
   const p2_large = [
-    { x: 155, y: 100 },
-    { x: 155, y: 183 },
-    { x: 155, y: 266 },
-    { x: 155, y: 349 }
+    { x: 159.10, y: 132.60 },
+    { x: 159.10, y: 217.60 },
+    { x: 159.10, y: 302.60 },
+    { x: 159.10, y: 387.60 }
   ];
   const p2_small = [
-    { x: 241, y: 120 },
-    { x: 241, y: 195 },
-    { x: 241, y: 270 },
-    { x: 241, y: 345 }
+    { x: 244.10, y: 164.60 },
+    { x: 244.10, y: 241.60 },
+    { x: 244.10, y: 318.60 },
+    { x: 244.10, y: 395.60 }
   ];
 
   const renderBox = (idx: number, x: number, y: number, size: number, color: string, showPhoto: boolean = true) => {
@@ -51,7 +52,7 @@ export const ButterflySheet: React.FC<ButterflySheetProps> = ({ images, butterfl
         style={{ position: 'absolute', left: x + 'mm', top: y + 'mm', cursor: onSelectPhoto ? 'pointer' : 'default' }}
         onClick={() => onSelectPhoto && onSelectPhoto(idx)}
       >
-        <div style={{ width: size + 'mm', height: size + 'mm', border: `1mm solid ${color}`, background: '#f8fafc', overflow: 'hidden', position: 'relative' }}>
+        <div style={{ width: size + 'mm', height: size + 'mm', border: `${size === 81 ? 1 : 0.8}mm solid ${color}`, background: '#ffffff', overflow: 'hidden', position: 'relative' }}>
           {showPhoto ? (
             <div style={{ width: '100%', height: '100%', position: 'absolute', left: 0, top: 0, overflow: 'hidden' }}>
               {img ? (
@@ -78,18 +79,23 @@ export const ButterflySheet: React.FC<ButterflySheetProps> = ({ images, butterfl
                   />
                 )
               ) : (
-                <div style={{ width: '100%', height: '100%', background: '#f1f5f9' }} />
+                <div style={{ width: '100%', height: '100%', background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <span style={{ fontSize: '8px', color: '#cbd5e1', fontWeight: 600 }}>Photo {idx + 1}</span>
+                </div>
               )}
             </div>
           ) : (
-             <div style={{ width: '100%', height: '100%', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ fontSize: '10px', color: '#cbd5e1', fontWeight: 600 }}>EMPTY</span>
+             <div style={{ width: '100%', height: '100%', background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ fontSize: '9px', color: '#cbd5e1', fontWeight: 600 }}>[Order 2 Slot]</span>
              </div>
           )}
         </div>
       </div>
     );
   };
+
+  const orderNum = orderId ? orderId.replace(/[^0-9]/g, '').slice(-6) || orderId.split('-')[0] : '000001';
+  const orderLabel = `Bt ${orderNum}`;
 
   return (
     <div 
@@ -105,31 +111,43 @@ export const ButterflySheet: React.FC<ButterflySheetProps> = ({ images, butterfl
         boxShadow: '0 0 20px rgba(0,0,0,0.1)'
       }}
     >
-      {/* Green Cut Line */}
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, border: '0.5mm solid #22c55e', pointerEvents: 'none', zIndex: 5 }} />
-      {/* Red Safe Margin */}
-      <div style={{ position: 'absolute', top: '11.25mm', left: '5mm', right: '5mm', bottom: '11.25mm', border: '0.5mm solid #ef4444', pointerEvents: 'none', zIndex: 5 }} />
+      {/* Green Cut Line (Sheet Perimeter) */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, border: '0.6mm solid #00963f', pointerEvents: 'none', zIndex: 5 }} />
+      {/* Red Safe Margin (320.2 x 460.1 mm) */}
+      <div style={{ position: 'absolute', top: '17.45mm', left: '5mm', width: '320.2mm', height: '460.1mm', border: '0.4mm solid #e3000f', pointerEvents: 'none', zIndex: 5 }} />
       
-      {/* Labels */}
-      <div style={{ position: 'absolute', left: '10mm', top: '2mm', fontSize: '12px', fontWeight: 800, color: '#1e3a8a' }}>Order: {orderId ? orderId.split('-')[0] : 'Bt 000001'}</div>
-      <div style={{ position: 'absolute', left: '155mm', top: '2mm', fontSize: '12px', fontWeight: 800, color: '#000', whiteSpace: 'nowrap' }}>Butterfly Box Print Template</div>
-      <div style={{ position: 'absolute', left: '260mm', top: '2mm', fontSize: '12px', fontWeight: 800, color: '#ef4444' }}>{orderId ? orderId.split('-')[0] : 'Bt 000001'}</div>
+      {/* Registration & Trim Marks */}
+      <div style={{ position: 'absolute', left: '5mm', top: '457.6mm', width: '0.4mm', height: '20mm', background: '#18181b' }} />
+      <div style={{ position: 'absolute', left: '5mm', top: '476.6mm', width: '20mm', height: '0.4mm', background: '#18181b' }} />
+      <div style={{ position: 'absolute', left: '324.2mm', top: '457.6mm', width: '0.4mm', height: '20mm', background: '#18181b' }} />
+      <div style={{ position: 'absolute', left: '305.2mm', top: '476.6mm', width: '20mm', height: '0.4mm', background: '#18181b' }} />
+      <div style={{ position: 'absolute', left: '5mm', top: '55mm', width: '0.4mm', height: '20mm', background: '#18181b' }} />
+      <div style={{ position: 'absolute', left: '5mm', top: '64mm', width: '5mm', height: '0.4mm', background: '#18181b' }} />
+      <div style={{ position: 'absolute', left: '324.2mm', top: '55mm', width: '0.4mm', height: '20mm', background: '#18181b' }} />
+      <div style={{ position: 'absolute', left: '320.2mm', top: '64mm', width: '5mm', height: '0.4mm', background: '#18181b' }} />
 
-      {/* Blue / Red blocks from the template */}
-      <div style={{ position: 'absolute', left: '10mm', top: '90mm', width: '30mm', height: '6mm', border: '0.5mm solid #2563eb' }} />
-      <div style={{ position: 'absolute', left: '260mm', top: '105mm', width: '30mm', height: '6mm', border: '0.5mm solid #dc2626' }} />
+      {/* Product 1 Barcode Box */}
+      <div style={{ position: 'absolute', left: '98.78mm', top: '116.6mm', width: '52.92mm', height: '12.5mm', border: '0.8mm solid #0000ff', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ fontSize: '8px', fontWeight: 700, color: '#000' }}>||||| {orderLabel} |||||</span>
+      </div>
+      {/* Product 1 Order ID Text */}
+      <div style={{ position: 'absolute', left: '16.63mm', top: '120mm', fontSize: '11px', fontWeight: 800, color: '#000' }}>{orderLabel}</div>
+      <div style={{ position: 'absolute', left: '65mm', top: '120mm', fontSize: '11px', fontWeight: 800, color: '#000' }}>{orderLabel}</div>
 
-      {/* Labels between blocks */}
-      <div style={{ position: 'absolute', left: '105mm', top: '130mm', fontSize: '10px', fontWeight: 700, color: '#1e3a8a' }}>65 mm</div>
+      {/* Product 2 Barcode Box */}
+      <div style={{ position: 'absolute', left: '252.58mm', top: '130.53mm', width: '52.89mm', height: '12.5mm', border: '0.8mm solid #ff0000', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ fontSize: '8px', fontWeight: 700, color: '#000' }}>[Order 2 Barcode]</span>
+      </div>
 
-      {/* P1 Large */}
-      {p1_large.map((coord, i) => renderBox(i, coord.x, coord.y, 81, '#2563eb', true))}
-      {/* P2 Large */}
-      {p2_large.map((coord, i) => renderBox(i, coord.x, coord.y, 81, '#dc2626', false))}
-      {/* P1 Small */}
-      {p1_small.map((coord, i) => renderBox(i + 4, coord.x, coord.y, 73, '#2563eb', true))}
-      {/* P2 Small */}
-      {p2_small.map((coord, i) => renderBox(i + 4, coord.x, coord.y, 73, '#dc2626', false))}
+      {/* P1 Large (Photos 0..3) */}
+      {p1_large.map((coord, i) => renderBox(i, coord.x, coord.y, 81, '#0000ff', true))}
+      {/* P1 Small (Photos 4..7) */}
+      {p1_small.map((coord, i) => renderBox(i + 4, coord.x, coord.y, 73, '#0000ff', true))}
+
+      {/* P2 Large (Order 2) */}
+      {p2_large.map((coord, i) => renderBox(i, coord.x, coord.y, 81, '#ff0000', false))}
+      {/* P2 Small (Order 2) */}
+      {p2_small.map((coord, i) => renderBox(i + 4, coord.x, coord.y, 73, '#ff0000', false))}
     </div>
   );
 };

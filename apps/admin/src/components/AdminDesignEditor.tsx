@@ -125,38 +125,39 @@ const AdminDesignEditor: React.FC<AdminDesignEditorProps> = ({
   }, [isButterfly, order.images]);
 
   const renderButterflySheet = (isReview = false) => {
+    // Exact Technical Blueprint Coordinates (1:1 mm:px layout)
     const p1_small = [
-      { x: 14, y: 22.35 },
-      { x: 93, y: 22.35 },
-      { x: 172, y: 22.35 },
-      { x: 251, y: 22.35 }
+      { x: 13.10, y: 36.60 },
+      { x: 90.10, y: 36.60 },
+      { x: 167.10, y: 36.60 },
+      { x: 244.10, y: 36.60 }
     ];
     const p1_large = [
-      { x: 14, y: 118.35 },
-      { x: 14, y: 209.01 },
-      { x: 14, y: 299.67 },
-      { x: 14, y: 390.33 }
+      { x: 13.10, y: 132.60 },
+      { x: 13.10, y: 217.60 },
+      { x: 13.10, y: 302.60 },
+      { x: 13.10, y: 387.60 }
     ];
     const p2_large = [
-      { x: 160, y: 118.35 },
-      { x: 160, y: 209.01 },
-      { x: 160, y: 299.67 },
-      { x: 160, y: 390.33 }
+      { x: 159.10, y: 132.60 },
+      { x: 159.10, y: 217.60 },
+      { x: 159.10, y: 302.60 },
+      { x: 159.10, y: 387.60 }
     ];
     const p2_small = [
-      { x: 251, y: 150.37 },
-      { x: 251, y: 233.03 },
-      { x: 251, y: 315.69 },
-      { x: 251, y: 398.35 }
+      { x: 244.10, y: 164.60 },
+      { x: 244.10, y: 241.60 },
+      { x: 244.10, y: 318.60 },
+      { x: 244.10, y: 395.60 }
     ];
 
-const renderBox = (idx: number, x: number, y: number, size: number, color: string, orderSource: any = null) => {
+    const renderBox = (idx: number, x: number, y: number, size: number, color: string, orderSource: any = null) => {
       if (idx === 0) console.log("RENDER BOX CALL! color:", color, "orderSource images:", orderSource ? (orderSource.images ? orderSource.images.length : 0) : "NULL");
       const crop = butterflyCrops[idx] || { scale: 1, rotation: 0, x: 0, y: 0 };
       const ratio = size / 140;
       const isActive = !isReview && activeButterflyIndex === idx && !!orderSource;
       return (
-        <div key={idx + '-' + x} style={{ position: 'absolute', left: x + 'px', top: y + 'px', width: size + 'px', height: size + 'px', border: `1.5px solid ${color}`, background: '#f8fafc', overflow: 'hidden' }}>
+        <div key={idx + '-' + x} style={{ position: 'absolute', left: x + 'px', top: y + 'px', width: size + 'px', height: size + 'px', border: `${size === 81 ? 1.5 : 1.2}px solid ${color}`, background: '#f8fafc', overflow: 'hidden' }}>
           {orderSource ? (
             <div onClick={() => !isReview && changeActiveButterflyPhoto(idx)} style={{ width: '100%', height: '100%', position: 'absolute', left: 0, top: 0, cursor: isReview ? 'default' : 'pointer', outline: isActive ? `2px solid ${color}` : 'none', outlineOffset: '-2px', zIndex: isActive ? 10 : 1, overflow: 'hidden' }}>
               {(orderSource.images || [])[idx] ? (
@@ -173,6 +174,9 @@ const renderBox = (idx: number, x: number, y: number, size: number, color: strin
       );
     };
 
+    const order1Num = (order.templateSide === 'RED' ? linkedOrder : order)?.orderNumber || '000001';
+    const order2Num = (order.templateSide === 'RED' ? order : linkedOrder)?.orderNumber || '';
+
     return (
       <div style={{
         width: '330.2px',
@@ -184,26 +188,32 @@ const renderBox = (idx: number, x: number, y: number, size: number, color: strin
         transform: 'scale(0.85)',
         marginBottom: '-50px'
       }}>
-        {/* Green Cut Line */}
-        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, border: '1px solid #22c55e', pointerEvents: 'none', zIndex: 5 }} />
-        {/* Red Safe Margin */}
-        <div style={{ position: 'absolute', top: '11.25px', left: '5px', right: '5px', bottom: '11.25px', border: '1px solid #ef4444', pointerEvents: 'none', zIndex: 5 }} />
+        {/* Green Cut Line (Exact Sheet Perimeter) */}
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, border: '1px solid #00963f', pointerEvents: 'none', zIndex: 5 }} />
+        {/* Red Safe Margin (320.2 x 460.1 mm) */}
+        <div style={{ position: 'absolute', top: '17.45px', left: '5px', width: '320.2px', height: '460.1px', border: '1px solid #e3000f', pointerEvents: 'none', zIndex: 5 }} />
         
-        {/* Barcode Placeholders */}
-        <div style={{ position: 'absolute', left: '14px', top: '106px', fontSize: '6px', fontWeight: 800, color: '#1e3a8a' }}>Bt 000001</div>
-        <div style={{ position: 'absolute', left: '160px', top: '106px', fontSize: '6px', fontWeight: 800, color: '#1e3a8a' }}>Bt 000001</div>
-        <div style={{ position: 'absolute', left: '251px', top: '140px', fontSize: '6px', fontWeight: 800, color: '#1e3a8a' }}>Bt 000001</div>
+        {/* Barcode & Order Labels */}
+        <div style={{ position: 'absolute', left: '16.63px', top: '120px', fontSize: '7px', fontWeight: 800, color: '#000000' }}>Bt {order1Num}</div>
+        <div style={{ position: 'absolute', left: '65px', top: '120px', fontSize: '7px', fontWeight: 800, color: '#000000' }}>Bt {order1Num}</div>
+        <div style={{ position: 'absolute', left: '98.78px', top: '116.6px', width: '52.92px', height: '12.5px', border: '1px solid #0000ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '5px', fontWeight: 700 }}>||||| Bt {order1Num} |||||</div>
 
-        <div style={{ position: 'absolute', left: '160px', top: '22px', fontSize: '8px', fontWeight: 800, color: '#000', whiteSpace: 'nowrap' }}>Butterfly Box Print Template</div>
+        {order2Num && (
+          <>
+            <div style={{ position: 'absolute', left: '245.87px', top: '150px', fontSize: '7px', fontWeight: 800, color: '#000000' }}>Bt {order2Num}</div>
+            <div style={{ position: 'absolute', left: '285px', top: '150px', fontSize: '7px', fontWeight: 800, color: '#000000' }}>Bt {order2Num}</div>
+          </>
+        )}
+        <div style={{ position: 'absolute', left: '252.58px', top: '130.53px', width: '52.89px', height: '12.5px', border: '1px solid #ff0000', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '5px', fontWeight: 700 }}>{order2Num ? `||||| Bt ${order2Num} |||||` : '[Order 2 Barcode]'}</div>
 
         {/* P1 Large */}
-        {p1_large.map((coord, i) => renderBox(i, coord.x, coord.y, 81, '#2563eb', order.templateSide === 'RED' ? linkedOrder : order))}
+        {p1_large.map((coord, i) => renderBox(i, coord.x, coord.y, 81, '#0000ff', order.templateSide === 'RED' ? linkedOrder : order))}
         {/* P2 Large */}
-        {p2_large.map((coord, i) => renderBox(i, coord.x, coord.y, 81, '#dc2626', order.templateSide === 'RED' ? order : linkedOrder))}
+        {p2_large.map((coord, i) => renderBox(i, coord.x, coord.y, 81, '#ff0000', order.templateSide === 'RED' ? order : linkedOrder))}
         {/* P1 Small */}
-        {p1_small.map((coord, i) => renderBox(i + 4, coord.x, coord.y, 73, '#2563eb', order.templateSide === 'RED' ? linkedOrder : order))}
+        {p1_small.map((coord, i) => renderBox(i + 4, coord.x, coord.y, 73, '#0000ff', order.templateSide === 'RED' ? linkedOrder : order))}
         {/* P2 Small */}
-        {p2_small.map((coord, i) => renderBox(i + 4, coord.x, coord.y, 73, '#dc2626', order.templateSide === 'RED' ? order : linkedOrder))}
+        {p2_small.map((coord, i) => renderBox(i + 4, coord.x, coord.y, 73, '#ff0000', order.templateSide === 'RED' ? order : linkedOrder))}
       </div>
     );
   };

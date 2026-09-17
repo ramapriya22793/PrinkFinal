@@ -745,7 +745,32 @@ router.post('/:id/review', adminMiddleware, async (req, res) => {
 
         if (isButterfly) {
           const { generateButterflyBoxPdf } = require('../utils/butterflyGenerator');
-          const file = await generateButterflyBoxPdf({ orderId: existingOrder.id, images, order: existingOrder });
+          let o1 = existingOrder;
+          let o2 = null;
+          let imgs1 = images;
+          let imgs2 = undefined;
+          if (existingOrder.linkedOrderId) {
+            const linked = await Order.findOne({ id: existingOrder.linkedOrderId });
+            if (linked) {
+              if (existingOrder.templateSide === 'RED') {
+                o1 = linked;
+                o2 = existingOrder;
+                imgs1 = linked.images || [];
+                imgs2 = images;
+              } else {
+                o2 = linked;
+                imgs2 = linked.images || [];
+              }
+            }
+          }
+          const file = await generateButterflyBoxPdf({
+            orderId: o1.id,
+            images: imgs1,
+            order: o1,
+            orderId2: o2?.id,
+            images2: imgs2,
+            order2: o2
+          });
           printFiles.push({ ...file, isButterfly: true });
         } else if (isMagazine) {
           const { generateMagazinePdf } = require('../utils/magazineGenerator');
