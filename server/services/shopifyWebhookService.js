@@ -269,6 +269,41 @@ async function processShopifyOrderWebhook(payload, topic = 'orders/create') {
     }
   }
 
+  // Clean up any legacy bare-id order document (from pre-line-item split era)
+  try {
+    const OrderModel = require('../models/Order');
+    const bareIds = [orderName, payload.name, `#${payload.order_number}`, String(payload.order_number), shopifyId].filter(Boolean);
+    const legacyBareOrders = await OrderModel.find({
+      id: { $in: bareIds },
+      $or: [
+        { shopifyId: shopifyId },
+        { orderNumber: String(payload.order_number) },
+        { orderNumber: payload.order_number }
+      ]
+    }).lean();
+
+    for (const legacy of legacyBareOrders) {
+      if (legacy.images && legacy.images.length > 0 && savedOrders.length > 0) {
+        await OrderModel.updateOne(
+          { id: savedOrders[0].id },
+          {
+            $set: {
+              images: legacy.images,
+              designLockedAt: legacy.designLockedAt,
+              customizationStatus: legacy.customizationStatus,
+              uploadStatus: legacy.uploadStatus,
+              workflowStatus: legacy.workflowStatus
+            }
+          }
+        );
+      }
+      await OrderModel.deleteOne({ id: legacy.id });
+      console.log(`[SHOPIFY WEBHOOK SERVICE] Deleted legacy bare-id duplicate order document: ${legacy.id}`);
+    }
+  } catch (cleanErr) {
+    console.warn('[SHOPIFY WEBHOOK SERVICE] Cleanup legacy bare order error:', cleanErr.message);
+  }
+
   // Store Raw & Structured Shopify Order Log once per Shopify order (not per
   // line item) - this is an order-level summary, and already lists every
   // line item in its own lineItems array.

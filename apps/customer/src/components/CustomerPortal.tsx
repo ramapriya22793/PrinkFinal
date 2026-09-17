@@ -1911,7 +1911,7 @@ export default function CustomerPortal({
   // ── COMPUTED DATA ─────────────────────────────────────────────────────────
   // ===========================================================================
 
-  const allOrders   = orders;
+  const allOrders   = deduplicateOrders(orders);
   const allTemplates = templates;
   // Active = not delivered AND not completed via workflowStatus
   const activeOnly  = allOrders.filter(o => o.deliveryStatus !== 'delivered' && o.workflowStatus !== 'completed');
@@ -3292,7 +3292,7 @@ export default function CustomerPortal({
 
                 <div className="wiz-product-grid">
                   {(() => {
-                    const pendingOrders = orders.filter(o => isCustomizable(o) && o.customizationStatus !== 'completed');
+                    const pendingOrders = allOrders.filter(o => isCustomizable(o) && o.customizationStatus !== 'completed');
                     if (pendingOrders.length === 0) {
                       return (
                         <div style={{ textAlign: 'center', padding: '40px 20px', width: '100%', gridColumn: '1 / -1' }}>
