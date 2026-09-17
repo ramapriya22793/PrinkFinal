@@ -274,6 +274,41 @@ const syncOrderToDb = async (o) => {
     );
   }
 
+  // Clean up any legacy bare-id order document (from pre-line-item split era)
+  try {
+    const bareIds = [o.name, `#${o.order_number}`, String(o.order_number), String(o.id)].filter(Boolean);
+    const legacyBareOrders = await Order.find({
+      id: { $in: bareIds },
+      $or: [
+        { shopifyId: String(o.id) },
+        { orderNumber: String(o.order_number) },
+        { orderNumber: o.order_number }
+      ]
+    }).lean();
+
+    for (const legacy of legacyBareOrders) {
+      if (legacy.images && legacy.images.length > 0) {
+        const firstLineItemId = `${o.name || '#' + o.order_number}-${lineItemsList[0]?.id}`;
+        await Order.updateOne(
+          { id: firstLineItemId },
+          {
+            $set: {
+              images: legacy.images,
+              designLockedAt: legacy.designLockedAt,
+              customizationStatus: legacy.customizationStatus,
+              uploadStatus: legacy.uploadStatus,
+              workflowStatus: legacy.workflowStatus
+            }
+          }
+        );
+      }
+      await Order.deleteOne({ id: legacy.id });
+      console.log(`[SHOPIFY SYNC] Deleted legacy bare-id duplicate order document: ${legacy.id}`);
+    }
+  } catch (cleanErr) {
+    console.warn('[SHOPIFY SYNC] Cleanup legacy bare order error:', cleanErr.message);
+  }
+
   const updateQuery = {
     $set: { ...mappedOrder },
     $setOnInsert: { uploadToken, uploadLink, spreadsheetStatus: 'pending', whatsappStatus: 'pending', uploadStatus: 'pending' }

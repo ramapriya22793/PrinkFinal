@@ -115,7 +115,14 @@ router.get('/', adminMiddleware, async (req, res) => {
     // Orders have no top-level dpi/dpiStatus field - derive it at read time
     // from printFiles[] (see deriveDpiStatus) so the admin UI shows a real
     // status/"Not Checked" instead of a permanently blank badge.
-    const ordersWithDpi = orders.map(o => ({ ...o, ...deriveDpiStatus(o) }));
+    const { deduplicateOrders, cleanupDuplicateOrdersInDb } = require('../utils/orderDeduplication');
+    const { cleanOrders, duplicateIdsToDelete, mergesToPerform } = deduplicateOrders(orders);
+    if (duplicateIdsToDelete.length > 0 || mergesToPerform.length > 0) {
+      setImmediate(() => {
+        cleanupDuplicateOrdersInDb(Order, duplicateIdsToDelete, mergesToPerform);
+      });
+    }
+    const ordersWithDpi = cleanOrders.map(o => ({ ...o, ...deriveDpiStatus(o) }));
 
     return res.json({
       orders: ordersWithDpi,
@@ -234,6 +241,17 @@ router.get('/customer/orders', authMiddleware(), async (req, res) => {
     if (req.user.shopifyOrderId && customerOrders.length > 0) {
       const filtered = customerOrders.filter(o => String(o.shopifyId) === String(req.user.shopifyOrderId) || String(o.id) === String(req.user.shopifyOrderId));
       if (filtered.length > 0) customerOrders = filtered;
+    }
+
+    // ── Deduplicate customer orders to eliminate legacy bare-id parent records ──
+    const { deduplicateOrders, cleanupDuplicateOrdersInDb } = require('../utils/orderDeduplication');
+    const { cleanOrders, duplicateIdsToDelete, mergesToPerform } = deduplicateOrders(customerOrders);
+    customerOrders = cleanOrders;
+
+    if (duplicateIdsToDelete.length > 0 || mergesToPerform.length > 0) {
+      setImmediate(() => {
+        cleanupDuplicateOrdersInDb(Order, duplicateIdsToDelete, mergesToPerform);
+      });
     }
 
     // ── Return IMMEDIATELY — do not wait for any Shopify network call ──

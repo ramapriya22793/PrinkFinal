@@ -91,14 +91,83 @@ const MOCK_SKU_MAPPINGS = [] as unknown as SkuMapping[];
 export const isCustomizable = (o: any) => {
   if (!o) return false;
   if (o.requiresCustomization === false || o.requiredPhotoCount === 0) return false;
-  if (o.requiresCustomization === true || (typeof o.requiredPhotoCount === 'number' && o.requiredPhotoCount > 0)) return true;
   const t = (o.productType || '').toLowerCase();
   const p = (o.product || '').toLowerCase();
+  const s = (o.sku || '').toLowerCase();
   // "gift wrap" is a distinct phrase from "gift card" - a common Shopify
   // add-on line item that was previously falling through to customizable.
-  const nonCustomizableKeywords = ['gift card', 'gift-card', 'gift wrap', 'gift-wrap', 'giftwrap', 'voucher', 'shipping', 'donation'];
-  if (nonCustomizableKeywords.some(k => t.includes(k) || p.includes(k))) return false;
+  const nonCustomizableKeywords = [
+    'gift card', 'gift-card', 'gift wrap', 'gift-wrap', 'giftwrap',
+    'voucher', 'shipping', 'donation', 'wrap', 'pg-gi-wp', 'greeting card'
+  ];
+  if (nonCustomizableKeywords.some(k => t.includes(k) || p.includes(k) || s.includes(k))) return false;
+  if (o.requiresCustomization === true || (typeof o.requiredPhotoCount === 'number' && o.requiredPhotoCount > 0)) return true;
   return true;
+};
+
+/**
+ * Deduplicate order list for Customer Portal.
+ * Eliminates legacy bare-id parent records (e.g. "186225") whenever child line-item
+ * specific records (e.g. "186225-17439512690917") exist.
+ */
+export const deduplicateOrders = (orders: Order[]): Order[] => {
+  if (!Array.isArray(orders) || orders.length <= 1) return orders || [];
+  const lineItemOrders = orders.filter(o => o && o.id && /-\d+$/.test(String(o.id)));
+  const lineItemOrderKeys = new Set<string>();
+
+  for (const o of lineItemOrders) {
+    const rawId = String(o.id);
+    const baseId = rawId.replace(/-\d+$/, '').replace(/^#/, '').trim();
+    if (baseId) {
+      lineItemOrderKeys.add(baseId);
+      lineItemOrderKeys.add(`#${baseId}`);
+    }
+    if (o.orderNumber) {
+      const cleanNum = String(o.orderNumber).replace(/^#/, '').trim();
+      lineItemOrderKeys.add(cleanNum);
+      lineItemOrderKeys.add(`#${cleanNum}`);
+    }
+    if (o.shopifyId) {
+      lineItemOrderKeys.add(String(o.shopifyId).trim());
+    }
+    if (o.name) {
+      const cleanName = String(o.name).replace(/^#/, '').trim();
+      lineItemOrderKeys.add(cleanName);
+      lineItemOrderKeys.add(`#${cleanName}`);
+    }
+  }
+
+  const cleanOrders: Order[] = [];
+  const seenIds = new Set<string>();
+
+  for (const o of orders) {
+    if (!o || !o.id) continue;
+    const rawId = String(o.id);
+    const isLineItem = /-\d+$/.test(rawId);
+    const cleanId = rawId.replace(/^#/, '').trim();
+    const cleanNum = String(o.orderNumber || '').replace(/^#/, '').trim();
+    const cleanShopifyId = String(o.shopifyId || '').trim();
+    const cleanName = String(o.name || '').replace(/^#/, '').trim();
+
+    if (!isLineItem) {
+      const isDuplicateParent =
+        lineItemOrderKeys.has(rawId) ||
+        lineItemOrderKeys.has(cleanId) ||
+        (cleanNum && lineItemOrderKeys.has(cleanNum)) ||
+        (cleanShopifyId && lineItemOrderKeys.has(cleanShopifyId)) ||
+        (cleanName && lineItemOrderKeys.has(cleanName));
+
+      if (isDuplicateParent) {
+        continue; // Exclude legacy bare duplicate
+      }
+    }
+
+    if (seenIds.has(rawId)) continue;
+    seenIds.add(rawId);
+    cleanOrders.push(o);
+  }
+
+  return cleanOrders;
 };
 
 export const getRequiredPhotoCount = (o: any): number => {
@@ -843,10 +912,11 @@ export default function CustomerPortal({
           console.error('Failed to parse token payload for order filtering', e);
         }
 
+        list = deduplicateOrders(list);
         setOrders(list);
         if (list.length > 0) {
           setActiveOrder(prevActive => {
-            if (!prevActive) return list[0];
+            if (!prevActive) return list.find((o: any) => isCustomizable(o)) || list[0];
             // Exact id match only - an order.orderNumber is shared by every
             // line item of a multi-item Shopify order (e.g. a Butterfly Box
             // + a Gift Wrap in the same checkout both carry orderNumber
@@ -1108,6 +1178,9 @@ export default function CustomerPortal({
 
     if (activeOrder.id !== loadedOrderIdRef.current) {
       loadedOrderIdRef.current = activeOrder.id;
+      if (activeOrder.productType) {
+        setSelectedProduct(activeOrder.productType);
+      }
 
       if (activeOrder.images && activeOrder.images.length > 0) {
         setImages(activeOrder.images.map((img: any) => ({
@@ -1874,10 +1947,12 @@ export default function CustomerPortal({
             if (filtered.length > 0) list = filtered;
           }
         } catch (_) {}
+        list = deduplicateOrders(list);
         setOrders(list);
         setActiveOrder((prev: any) => {
-          const fresh = list.find((o: any) => o.id === (prev?.id || list[0]?.id));
-          return fresh || list[0] || null;
+          const defaultTarget = list.find((x: any) => isCustomizable(x)) || list[0];
+          const fresh = list.find((o: any) => o.id === (prev?.id || defaultTarget?.id));
+          return fresh || defaultTarget || null;
         });
         setTrackingLastRefresh(new Date());
       }
@@ -2660,12 +2735,28 @@ export default function CustomerPortal({
                     onClick={() => navTo('upload')}>
                     <ShoppingBag style={{ width: 14, height: 14 }} /> View Orders
                   </button>
-                  {activeOnly.some(o => isCustomizable(o) && o.customizationStatus !== 'completed') && (
-                  <button className="btn btn-outline" style={{ border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: 12, padding: '8px 16px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}
-                    onClick={() => navTo('preview')}>
-                    <UploadCloud style={{ width: 14, height: 14 }} /> Upload Photos
-                  </button>
-                  )}
+                  {(() => {
+                    const pendingCustomizable = activeOnly.filter(o => isCustomizable(o) && o.customizationStatus !== 'completed');
+                    if (pendingCustomizable.length === 0) return null;
+                    const label = pendingCustomizable.length === 1
+                      ? `Upload ${getRequiredPhotoCount(pendingCustomizable[0])} Photo${getRequiredPhotoCount(pendingCustomizable[0]) === 1 ? '' : 's'}`
+                      : `Upload Photos (${pendingCustomizable.length})`;
+                    return (
+                      <button className="btn btn-outline" style={{ border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: 12, padding: '8px 16px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}
+                        onClick={() => {
+                          if (pendingCustomizable.length === 1) {
+                            setActiveOrder(pendingCustomizable[0]);
+                            setWizardStep(2);
+                            setForceDashboard(false);
+                          } else {
+                            navTo('preview');
+                            setWizardStep(1);
+                          }
+                        }}>
+                        <UploadCloud style={{ width: 14, height: 14 }} /> {label}
+                      </button>
+                    );
+                  })()}
                   {/* Only a shortcut when there's exactly one candidate - activeOnly[0]
                       used to be opened unconditionally, so with more than one
                       customizable order this could open the wrong product entirely
@@ -3005,11 +3096,27 @@ export default function CustomerPortal({
                 <h1 className="page-heading">My Orders</h1>
                 <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: 0 }}>All your Shopify purchases in one place</p>
               </div>
-              {(allOrders || []).some(o => isCustomizable(o) && !(o.images && o.images.length > 0)) && (
-              <button className="btn btn-primary btn-sm" onClick={() => navTo('preview')}>
-                <i className="bi bi-cloud-upload" /> Upload Photos
-              </button>
-              )}
+              {(() => {
+                const pending = (allOrders || []).filter(o => isCustomizable(o) && !(o.images && o.images.length > 0));
+                if (pending.length === 0) return null;
+                const label = pending.length === 1
+                  ? `Upload ${getRequiredPhotoCount(pending[0])} Photo${getRequiredPhotoCount(pending[0]) === 1 ? '' : 's'}`
+                  : `Upload Photos (${pending.length})`;
+                return (
+                  <button className="btn btn-primary btn-sm" onClick={() => {
+                    if (pending.length === 1) {
+                      setActiveOrder(pending[0]);
+                      setWizardStep(2);
+                      setForceDashboard(false);
+                    } else {
+                      navTo('preview');
+                      setWizardStep(1);
+                    }
+                  }}>
+                    <i className="bi bi-cloud-upload" /> {label}
+                  </button>
+                );
+              })()}
             </div>
 
             {/* Filter tabs */}
@@ -3248,7 +3355,7 @@ export default function CustomerPortal({
                                   goWizard(2, 'forward');
                                 }}
                               >
-                                <><i className="bi bi-stars" /> Personalize</>
+                                <><i className="bi bi-cloud-upload" /> Upload {getRequiredPhotoCount(order)} Photo{getRequiredPhotoCount(order) === 1 ? '' : 's'}</>
                               </button>
                             </div>
                           </div>
@@ -3366,7 +3473,27 @@ export default function CustomerPortal({
             {/* ================================================================
                 WIZARD STEP 2 — Photo Upload
                 ================================================================ */}
-            {wizardStep === 2 && activeOrder && (
+            {wizardStep === 2 && activeOrder && !isCustomizable(activeOrder) && (
+              <div className="card" style={{ textAlign: 'center', padding: '40px 20px', maxWidth: 500, margin: '40px auto', borderRadius: 16 }}>
+                <i className="bi bi-info-circle text-primary" style={{ fontSize: 40, marginBottom: 16, display: 'block' }} />
+                <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>No Customization Required</h3>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 20 }}>
+                  <strong>{activeOrder.product}</strong> does not require photo customization.
+                </p>
+                <button className="btn btn-primary btn-sm" onClick={() => {
+                  const nextCustom = orders.find(o => isCustomizable(o) && o.customizationStatus !== 'completed');
+                  if (nextCustom) {
+                    setActiveOrder(nextCustom);
+                  } else {
+                    setWizardStep(1);
+                  }
+                }}>
+                  Select Customizable Product
+                </button>
+              </div>
+            )}
+
+            {wizardStep === 2 && activeOrder && isCustomizable(activeOrder) && (
               <div className={`wizard-panel${wizardDir === 'back' ? ' reverse' : ''}`}>
                 {/* Selected product banner */}
                                 <div className="wiz-prod-banner">

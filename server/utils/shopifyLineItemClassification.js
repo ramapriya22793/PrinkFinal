@@ -45,7 +45,7 @@ const PHOTO_COUNT_BY_TYPE = {
  * "gift wrap" is a distinct phrase from "gift card" - a common Shopify
  * add-on line item that was previously falling through to customizable.
  */
-const NON_CUSTOMIZABLE_KEYWORDS = ['gift card', 'gift-card', 'gift wrap', 'gift-wrap', 'giftwrap', 'voucher', 'shipping', 'donation'];
+const NON_CUSTOMIZABLE_KEYWORDS = ['gift card', 'gift-card', 'gift wrap', 'gift-wrap', 'giftwrap', 'voucher', 'shipping', 'donation', 'wrap', 'pg-gi-wp', 'greeting card'];
 
 /** Detect the internal product type from a line item's title. Defaults to 'canvas'. */
 function detectProductType(title) {
