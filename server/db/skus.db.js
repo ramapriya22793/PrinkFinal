@@ -9,11 +9,13 @@ async function getSkuByCode(sku) {
 }
 
 async function saveSkuMapping(skuData) {
-  const query = skuData.sku ? { sku: skuData.sku } : { id: skuData.id };
+  const id = skuData.id || ('sku_' + (skuData.sku ? skuData.sku.toLowerCase().replace(/[^a-z0-9_-]/g, '_') : Date.now()));
+  const payload = { ...skuData, id };
+  const query = skuData.id ? { $or: [{ id: skuData.id }, { sku: skuData.sku }] } : { sku: skuData.sku };
   return await SKU.findOneAndUpdate(
     query,
-    skuData,
-    { upsert: true, new: true }
+    payload,
+    { upsert: true, new: true, setDefaultsOnInsert: true }
   ).lean();
 }
 

@@ -27,6 +27,15 @@ export interface UploadedImage {
   previewUrl?: string;
   name: string;
   serverFilename?: string;
+  originalSrc?: string;
+  isCropped?: boolean;
+  transform?: {
+    scale?: number;
+    rotation?: number;
+    mask?: string;
+    x?: number;
+    y?: number;
+  };
 }
 
 export interface PrintTheme {

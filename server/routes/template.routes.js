@@ -58,6 +58,15 @@ router.post('/', adminMiddleware, async (req, res) => {
   }
 });
 
+router.put('/:id', adminMiddleware, async (req, res) => {
+  try {
+    const template = await db.saveTemplate({ ...req.body, id: req.params.id });
+    res.json({ success: true, template });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 router.delete('/:id', adminMiddleware, async (req, res) => {
   try {
     await db.deleteTemplate(req.params.id);

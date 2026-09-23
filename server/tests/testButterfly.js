@@ -1,6 +1,7 @@
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
 const { generateButterflyBoxPdf } = require('../utils/butterflyGenerator');
 const fs = require('fs');
-const path = require('path');
 
 async function run() {
   try {

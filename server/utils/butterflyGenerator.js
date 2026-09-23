@@ -27,43 +27,46 @@ const mmToPt = (mm) => (mm / 25.4) * 72;
  *   [ { x: 244.10, y: 164.60 }, { x: 244.10, y: 241.60 }, { x: 244.10, y: 318.60 }, { x: 244.10, y: 395.60 } ]
  * - Barcode Box: x = 252.58 mm, y = 130.53 mm, w = 52.89 mm, h = 12.50 mm
  */
+// Shift template 1 mm to the right per client requirement
+const SHIFT_X_MM = 1.00;
+
 const PAGE_WIDTH_MM = 330.20;
 const PAGE_HEIGHT_MM = 482.60;
-const SAFE_OFFSET_X = 5.00;
+const SAFE_OFFSET_X = 5.00 + SHIFT_X_MM;
 const SAFE_OFFSET_Y = 17.45;
 const SAFE_WIDTH_MM = 320.20;
 const SAFE_HEIGHT_MM = 460.10;
 
 const p1_small = [
-  { x: 13.10, y: 36.60 },
-  { x: 90.10, y: 36.60 },
-  { x: 167.10, y: 36.60 },
-  { x: 244.10, y: 36.60 }
+  { x: 13.10 + SHIFT_X_MM, y: 36.60 },
+  { x: 90.10 + SHIFT_X_MM, y: 36.60 },
+  { x: 167.10 + SHIFT_X_MM, y: 36.60 },
+  { x: 244.10 + SHIFT_X_MM, y: 36.60 }
 ];
 
 const p1_large = [
-  { x: 13.10, y: 132.60 },
-  { x: 13.10, y: 217.60 },
-  { x: 13.10, y: 302.60 },
-  { x: 13.10, y: 387.60 }
+  { x: 13.10 + SHIFT_X_MM, y: 132.60 },
+  { x: 13.10 + SHIFT_X_MM, y: 217.60 },
+  { x: 13.10 + SHIFT_X_MM, y: 302.60 },
+  { x: 13.10 + SHIFT_X_MM, y: 387.60 }
 ];
 
 const p2_large = [
-  { x: 159.10, y: 132.60 },
-  { x: 159.10, y: 217.60 },
-  { x: 159.10, y: 302.60 },
-  { x: 159.10, y: 387.60 }
+  { x: 159.10 + SHIFT_X_MM, y: 132.60 },
+  { x: 159.10 + SHIFT_X_MM, y: 217.60 },
+  { x: 159.10 + SHIFT_X_MM, y: 302.60 },
+  { x: 159.10 + SHIFT_X_MM, y: 387.60 }
 ];
 
 const p2_small = [
-  { x: 244.10, y: 164.60 },
-  { x: 244.10, y: 241.60 },
-  { x: 244.10, y: 318.60 },
-  { x: 244.10, y: 395.60 }
+  { x: 244.10 + SHIFT_X_MM, y: 164.60 },
+  { x: 244.10 + SHIFT_X_MM, y: 241.60 },
+  { x: 244.10 + SHIFT_X_MM, y: 318.60 },
+  { x: 244.10 + SHIFT_X_MM, y: 395.60 }
 ];
 
-const p1_barcode = { x: 98.78, y: 116.60, w: 52.92, h: 12.50 };
-const p2_barcode = { x: 252.58, y: 130.53, w: 52.89, h: 12.50 };
+const p1_barcode = { x: 99.75 + SHIFT_X_MM, y: 116.60, w: 53.70, h: 12.50 };
+const p2_barcode = { x: 253.75 + SHIFT_X_MM, y: 130.53, w: 53.70, h: 12.50 };
 
 /**
  * Draw vector Code-128 style barcode simulation pattern inside barcode box
@@ -100,21 +103,21 @@ function drawVectorBarcode(doc, xMm, yMm, wMm, hMm) {
  * Draw registration and trim marks matching technical blueprint
  */
 function drawRegistrationMarks(doc) {
-  // Bottom-Left L-mark (x=5.00, y=477.60)
-  doc.rect(mmToPt(5.00), mmToPt(457.60), mmToPt(1.00), mmToPt(20.00)).fill('#18181b');
-  doc.rect(mmToPt(5.00), mmToPt(476.60), mmToPt(20.00), mmToPt(1.00)).fill('#18181b');
+  // Bottom-Left L-mark (x=5.00 + SHIFT_X_MM, y=477.60)
+  doc.rect(mmToPt(5.00 + SHIFT_X_MM), mmToPt(457.60), mmToPt(1.00), mmToPt(20.00)).fill('#18181b');
+  doc.rect(mmToPt(5.00 + SHIFT_X_MM), mmToPt(476.60), mmToPt(20.00), mmToPt(1.00)).fill('#18181b');
 
-  // Bottom-Right L-mark (x=325.20, y=477.60)
-  doc.rect(mmToPt(324.20), mmToPt(457.60), mmToPt(1.00), mmToPt(20.00)).fill('#18181b');
-  doc.rect(mmToPt(305.20), mmToPt(476.60), mmToPt(20.00), mmToPt(1.00)).fill('#18181b');
+  // Bottom-Right L-mark (x=325.20 + SHIFT_X_MM, y=477.60)
+  doc.rect(mmToPt(324.20 + SHIFT_X_MM), mmToPt(457.60), mmToPt(1.00), mmToPt(20.00)).fill('#18181b');
+  doc.rect(mmToPt(305.20 + SHIFT_X_MM), mmToPt(476.60), mmToPt(20.00), mmToPt(1.00)).fill('#18181b');
 
-  // Left Margin T-mark (x=5.00, y=64.00)
-  doc.rect(mmToPt(5.00), mmToPt(55.00), mmToPt(1.00), mmToPt(20.00)).fill('#18181b');
-  doc.rect(mmToPt(5.00), mmToPt(64.00), mmToPt(5.00), mmToPt(1.00)).fill('#18181b');
+  // Left Margin T-mark (x=5.00 + SHIFT_X_MM, y=64.00)
+  doc.rect(mmToPt(5.00 + SHIFT_X_MM), mmToPt(55.00), mmToPt(1.00), mmToPt(20.00)).fill('#18181b');
+  doc.rect(mmToPt(5.00 + SHIFT_X_MM), mmToPt(64.00), mmToPt(5.00), mmToPt(1.00)).fill('#18181b');
 
-  // Right Margin T-mark (x=325.20, y=64.00)
-  doc.rect(mmToPt(324.20), mmToPt(55.00), mmToPt(1.00), mmToPt(20.00)).fill('#18181b');
-  doc.rect(mmToPt(320.20), mmToPt(64.00), mmToPt(5.00), mmToPt(1.00)).fill('#18181b');
+  // Right Margin T-mark (x=325.20 + SHIFT_X_MM, y=64.00)
+  doc.rect(mmToPt(324.20 + SHIFT_X_MM), mmToPt(55.00), mmToPt(1.00), mmToPt(20.00)).fill('#18181b');
+  doc.rect(mmToPt(320.20 + SHIFT_X_MM), mmToPt(64.00), mmToPt(5.00), mmToPt(1.00)).fill('#18181b');
 }
 
 /**
@@ -351,8 +354,8 @@ async function generateButterflyBoxPdf({ orderId, images, order, orderId2, image
     const order1Num = order?.orderNumber || (orderId ? String(orderId).replace(/[^0-9]/g, '').slice(-6) || String(orderId).slice(-6) : '000001');
     const order1Label = `Bt ${order1Num}`;
     doc.fillColor('#000000').font('Helvetica-Bold').fontSize(9.5);
-    doc.text(order1Label, mmToPt(16.63), mmToPt(120.00), { lineBreak: false });
-    doc.text(order1Label, mmToPt(65.00), mmToPt(120.00), { lineBreak: false });
+    doc.text(order1Label, mmToPt(16.63 + SHIFT_X_MM), mmToPt(120.00), { lineBreak: false });
+    doc.text(order1Label, mmToPt(65.00 + SHIFT_X_MM), mmToPt(120.00), { lineBreak: false });
 
     // Product 2 (Red lines - Order 2)
     // Photos 0..3 -> 4 Large (81x81mm), Photos 4..7 -> 4 Small (73x73mm)
@@ -372,8 +375,8 @@ async function generateButterflyBoxPdf({ orderId, images, order, orderId2, image
       const order2Num = order2?.orderNumber || (orderId2 ? String(orderId2).replace(/[^0-9]/g, '').slice(-6) || String(orderId2).slice(-6) : '000002');
       const order2Label = `Bt ${order2Num}`;
       doc.fillColor('#000000').font('Helvetica-Bold').fontSize(9.5);
-      doc.text(order2Label, mmToPt(245.87), mmToPt(150.00), { lineBreak: false });
-      doc.text(order2Label, mmToPt(285.00), mmToPt(150.00), { lineBreak: false });
+      doc.text(order2Label, mmToPt(245.87 + SHIFT_X_MM), mmToPt(150.00), { lineBreak: false });
+      doc.text(order2Label, mmToPt(285.00 + SHIFT_X_MM), mmToPt(150.00), { lineBreak: false });
     }
 
     doc.end();

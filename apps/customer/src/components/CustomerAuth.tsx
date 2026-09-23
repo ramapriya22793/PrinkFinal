@@ -11,6 +11,54 @@ export default function CustomerAuth() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const paramEmail = params.get('email') || params.get('query');
+    const paramOrder = params.get('orderNumber') || params.get('order') || params.get('order_number');
+
+    if (paramEmail) setEmail(paramEmail);
+    if (paramOrder) {
+      setOrderNumber(paramOrder);
+      setLoginMode('order_email');
+    }
+
+    if (paramEmail && paramOrder) {
+      const emailTrimmed = paramEmail.trim();
+      const orderNoTrimmed = paramOrder.trim().replace(/^#/, '');
+      const API_URL = import.meta.env.VITE_API_URL || '';
+
+      setLoading(true);
+      fetch(`${API_URL}/api/auth/shopify-dev-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: emailTrimmed,
+          query: emailTrimmed,
+          orderNumber: orderNoTrimmed
+        })
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.token) {
+            localStorage.setItem('customer_token', data.token);
+            localStorage.setItem('customerName', data.user?.name || 'Shopify Customer');
+            localStorage.setItem('customerPhone', data.user?.phone || '+919876543210');
+            localStorage.setItem('customerId', data.user?.id || '');
+            localStorage.setItem('customerEmail', data.user?.email || emailTrimmed);
+            window.location.href = '/customer';
+          } else {
+            setError(data.error || 'Authentication failed. Please verify your details.');
+          }
+        })
+        .catch(() => {
+          setError('Network error. Please click Sign In below.');
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+    }
+  }, []);
+
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);

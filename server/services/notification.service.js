@@ -19,16 +19,47 @@ const Notification = require('../models/Notification');
 
 /** Message templates. `order` is the workflow document. */
 const TEMPLATES = {
-  upload_link: order => ({
-    title: 'Upload your photos',
-    message: `Hello ${order.customer?.name || 'there'}, thank you for ordering from THE PRINK. `
-      + `Please upload your photos for ${order.product}: ${order.uploadLink || ''}`
-  }),
-  upload_reminder: order => ({
-    title: 'Reminder: photos needed',
-    message: `Hi ${order.customer?.name || 'there'}, we're still waiting on your photos for order `
-      + `${order.orderNumber || order.id}. Upload here: ${order.uploadLink || ''}`
-  }),
+  upload_link: order => {
+    const customerName = order.customer?.name || order.customer?.firstName || 'Valued Customer';
+    const cleanOrderNum = String(order.orderNumber || order.id).replace(/^#/, '').split('-')[0];
+    const email = order.email || order.customer?.email || '';
+    const product = order.product || 'Custom Photo Product';
+    const photoCount = order.requiredPhotoCount || 1;
+    const baseUrl = process.env.CUSTOMER_APP_URL || process.env.FRONTEND_URL || 'https://customer.theprink.in';
+    const uploadLink = order.uploadLink || `${baseUrl}/upload/${order.uploadToken || ''}`;
+    const magicLink = order.uploadToken ? `${baseUrl}/o/${order.uploadToken}` : uploadLink;
+    const prefilledLoginLink = `${baseUrl}/customer/auth?email=${encodeURIComponent(email)}&orderNumber=${encodeURIComponent(cleanOrderNum)}`;
+
+    return {
+      title: 'Upload your photos',
+      message: `Hello ${customerName}, thank you for your order with THE PRINK! 🎉\n\n`
+        + `Your order for "${product}" (#${cleanOrderNum}) requires ${photoCount} photos for customization.\n\n`
+        + `👉 Upload Photos Directly:\n${magicLink}\n\n`
+        + `Or log in to your Customer Portal:\n${prefilledLoginLink}\n`
+        + `📧 Email: ${email}\n`
+        + `📦 Order Number: #${cleanOrderNum}`
+    };
+  },
+  upload_reminder: order => {
+    const customerName = order.customer?.name || order.customer?.firstName || 'Valued Customer';
+    const cleanOrderNum = String(order.orderNumber || order.id).replace(/^#/, '').split('-')[0];
+    const email = order.email || order.customer?.email || '';
+    const product = order.product || 'Custom Photo Product';
+    const photoCount = order.requiredPhotoCount || 1;
+    const baseUrl = process.env.CUSTOMER_APP_URL || process.env.FRONTEND_URL || 'https://customer.theprink.in';
+    const uploadLink = order.uploadLink || `${baseUrl}/upload/${order.uploadToken || ''}`;
+    const magicLink = order.uploadToken ? `${baseUrl}/o/${order.uploadToken}` : uploadLink;
+    const prefilledLoginLink = `${baseUrl}/customer/auth?email=${encodeURIComponent(email)}&orderNumber=${encodeURIComponent(cleanOrderNum)}`;
+
+    return {
+      title: 'Reminder: photos needed',
+      message: `Hi ${customerName}, we are awaiting your photos to start printing order #${cleanOrderNum} (${product})!\n\n`
+        + `👉 Upload ${photoCount} Photos Here:\n${magicLink}\n\n`
+        + `Or log in to your Customer Portal:\n${prefilledLoginLink}\n`
+        + `📧 Email: ${email}\n`
+        + `📦 Order Number: #${cleanOrderNum}`
+    };
+  },
   upload_complete: order => ({
     title: 'Photos received',
     message: `Thanks ${order.customer?.name || ''}! We've received your photos for ${order.product}.`

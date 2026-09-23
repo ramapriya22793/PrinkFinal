@@ -791,11 +791,15 @@ export default function CustomerPortal({
 
 
   // ── Crop modal ──────────────────────────────────────────────────────────────
-  const [cropOpen, setCropOpen]     = useState(false);
-  const [cropTarget, setCropTarget] = useState<UploadedImage | null>(null);
-  const [cropMask, setCropMask]     = useState<CropMaskType>('square');
-  const [cropScale, setCropScale]   = useState(1);
-  const [cropRot, setCropRot]       = useState(0);
+  const [cropOpen, setCropOpen]         = useState(false);
+  const [cropTarget, setCropTarget]     = useState<UploadedImage | null>(null);
+  const [cropMask, setCropMask]         = useState<CropMaskType>('square');
+  const [cropScale, setCropScale]       = useState(1);
+  const [cropRot, setCropRot]           = useState(0);
+  const [cropPan, setCropPan]           = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [cropIsDragging, setCropIsDragging] = useState(false);
+  const cropDragStartRef                = useRef<{ x: number; y: number; panX: number; panY: number }>({ x: 0, y: 0, panX: 0, panY: 0 });
+  const [cropBaseDims, setCropBaseDims] = useState<{ width: number; height: number }>({ width: 280, height: 280 });
 
   // ── Photo review lightbox ────────────────────────────────────────────────────
   // Lets a customer check any single uploaded photo at full size, with
@@ -1176,40 +1180,41 @@ export default function CustomerPortal({
       return;
     }
 
-    if (activeOrder.id !== loadedOrderIdRef.current) {
+    const isNewOrder = activeOrder.id !== loadedOrderIdRef.current;
+    if (isNewOrder) {
       loadedOrderIdRef.current = activeOrder.id;
       if (activeOrder.productType) {
         setSelectedProduct(activeOrder.productType);
       }
+    }
 
-      if (activeOrder.images && activeOrder.images.length > 0) {
+    if (activeOrder.images && activeOrder.images.length > 0) {
+      // Sync if new order OR if local images count differs from order images count
+      if (isNewOrder || images.length === 0 || images.length !== activeOrder.images.length) {
         setImages(activeOrder.images.map((img: any) => ({
           id: img.id,
           name: img.name || 'image.jpg',
           src: img.previewUrl || img.src || img.url,
-          url: img.url || img.src,
-          previewUrl: img.previewUrl,
-          serverFilename: img.serverFilename || (img.url ? img.url.split('/').pop() : '')
+          url: img.url || img.src || img.previewUrl,
+          previewUrl: img.previewUrl || img.url || img.src,
+          serverFilename: img.serverFilename || (img.url ? img.url.split('/').pop() : ''),
+          transform: img.transform
         })));
-        setLivePreviewPhoto(activeOrder.images[0]?.previewUrl || activeOrder.images[0]?.src || null);
-      } else {
-        setImages([]);
-        setLivePreviewPhoto(null);
+        setLivePreviewPhoto(activeOrder.images[0]?.previewUrl || activeOrder.images[0]?.src || activeOrder.images[0]?.url || null);
       }
+    } else if (isNewOrder) {
+      setImages([]);
+      setLivePreviewPhoto(null);
+    }
 
-      if (activeOrder.designData) {
-        try {
-          const parsed = JSON.parse(activeOrder.designData);
-          if (parsed && parsed.butterflyCrops) {
-            setButterflyCrops(parsed.butterflyCrops);
-          } else {
-            setButterflyCrops({});
-          }
-        } catch {
-          setButterflyCrops({});
+    if (activeOrder.designData) {
+      try {
+        const parsed = typeof activeOrder.designData === 'string' ? JSON.parse(activeOrder.designData) : activeOrder.designData;
+        if (parsed && parsed.butterflyCrops) {
+          setButterflyCrops(parsed.butterflyCrops);
         }
-      } else {
-        setButterflyCrops({});
+      } catch {
+        /* keep existing crops */
       }
     }
   }, [activeOrder]);
@@ -1312,11 +1317,11 @@ export default function CustomerPortal({
         images: images.length > 0 ? images.map(img => ({
           id: img.id,
           name: img.name,
-          src: img.url || img.src,
-          url: img.url || img.src,
-          previewUrl: img.previewUrl,
+          src: (img.src && img.src.startsWith('data:')) ? img.src : (img.previewUrl || img.url || img.src),
+          url: (img.src && img.src.startsWith('data:')) ? img.src : (img.url || img.previewUrl || img.src),
+          previewUrl: (img.src && img.src.startsWith('data:')) ? img.src : (img.previewUrl || img.url || img.src),
           serverFilename: img.serverFilename || img.name,
-          ...(canonicalTransform ? { transform: canonicalTransform } : {})
+          transform: img.transform || (canonicalTransform ? canonicalTransform : undefined)
         })) : (livePreviewPhoto ? [{ id: 'img_1', name: 'upload.jpg', src: livePreviewPhoto, url: livePreviewPhoto, serverFilename: 'upload.jpg', ...(canonicalTransform ? { transform: canonicalTransform } : {}) }] : [])
       };
       
@@ -1517,10 +1522,11 @@ export default function CustomerPortal({
             images: images.map(img => ({
               id: img.id,
               name: img.name,
-              src: img.url || img.src,
-              url: img.url || img.src,
-              previewUrl: img.previewUrl,
-              serverFilename: img.serverFilename || img.name
+              src: (img.src && img.src.startsWith('data:')) ? img.src : (img.previewUrl || img.url || img.src),
+              url: (img.src && img.src.startsWith('data:')) ? img.src : (img.url || img.previewUrl || img.src),
+              previewUrl: (img.src && img.src.startsWith('data:')) ? img.src : (img.previewUrl || img.url || img.src),
+              serverFilename: img.serverFilename || img.name,
+              transform: img.transform
             })),
           }),
         });
@@ -1677,17 +1683,19 @@ export default function CustomerPortal({
         setImages(prev => {
           const updated = prev.map(img => img.id === localId 
             ? { 
+                ...img,
                 id: data.image.id, 
-                src: data.image.previewUrl || data.image.url, 
+                src: img.isCropped ? img.src : (data.image.previewUrl || data.image.url), 
                 url: data.image.url,
-                previewUrl: data.image.previewUrl,
+                previewUrl: img.isCropped ? img.previewUrl : data.image.previewUrl,
+                originalSrc: img.originalSrc || data.image.url,
                 name: data.image.name, 
                 serverFilename: data.image.url.split('/').pop()
               } 
             : img
           );
           if (updated[0]?.id === data.image.id) {
-            setLivePreviewPhoto(data.image.previewUrl || data.image.url);
+            setLivePreviewPhoto(updated[0].src || data.image.previewUrl || data.image.url);
           }
           return updated;
         });
@@ -1739,7 +1747,7 @@ export default function CustomerPortal({
       const id = `img-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       reader.onload = e => {
         const src = e.target?.result as string;
-        setImages(prev => [...prev, { id, src, name: file.name }]);
+        setImages(prev => [...prev, { id, src, originalSrc: src, name: file.name }]);
         const progressTimer = simulateProgress(id);
         if (fileIdx === 0) setLivePreviewPhoto(src);
         uploadOne(file, id, progressTimer);
@@ -1750,8 +1758,124 @@ export default function CustomerPortal({
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files) addImages(e.target.files); };
   const handleDrop = (e: React.DragEvent) => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files) addImages(e.dataTransfer.files); };
-  const removeImage = (id: string) => { setImages(p => p.filter(i => i.id !== id)); setUploadProgress(p => { const n = { ...p }; delete n[id]; return n; }); };
-  const openCrop = (img: UploadedImage) => { setCropTarget(img); setCropScale(1); setCropRot(0); setCropMask('square'); setCropOpen(true); };
+  const openCrop = (img: UploadedImage) => {
+    const orig = img.originalSrc || img.src || img.previewUrl || img.url || '';
+    const targetWithOrig: UploadedImage = {
+      ...img,
+      originalSrc: orig,
+      src: orig
+    };
+    setCropTarget(targetWithOrig);
+    setCropScale(img.transform?.scale || 1);
+    setCropRot(img.transform?.rotation || 0);
+    setCropPan({ x: img.transform?.x || 0, y: img.transform?.y || 0 });
+    setCropMask((img.transform?.mask as CropMaskType) || 'square');
+    setCropOpen(true);
+  };
+
+  const handleApplyCrop = async () => {
+    if (!cropTarget) return;
+
+    let croppedDataUrl = cropTarget.src || cropTarget.previewUrl || cropTarget.url || '';
+    try {
+      const sourceUrl = cropTarget.originalSrc || cropTarget.src || cropTarget.previewUrl || cropTarget.url || '';
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      const loadPromise = new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('Failed to load image'));
+      });
+      img.src = sourceUrl;
+      await loadPromise;
+
+      const canvas = document.createElement('canvas');
+      const CROP_BOX_SIZE = 280; // Viewport width & height
+      const OUTPUT_SIZE = 1200;  // Ultra-sharp 1200x1200 export resolution
+      canvas.width = OUTPUT_SIZE;
+      canvas.height = OUTPUT_SIZE;
+      const ctx = canvas.getContext('2d');
+
+      if (ctx) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, OUTPUT_SIZE, OUTPUT_SIZE);
+
+        ctx.save();
+        ctx.translate(OUTPUT_SIZE / 2, OUTPUT_SIZE / 2);
+        ctx.rotate((cropRot * Math.PI) / 180);
+
+        const ratio = OUTPUT_SIZE / CROP_BOX_SIZE;
+        ctx.translate(cropPan.x * ratio, cropPan.y * ratio);
+        ctx.scale(cropScale, cropScale);
+
+        let drawW = CROP_BOX_SIZE * ratio;
+        let drawH = CROP_BOX_SIZE * ratio;
+        const imgAspect = img.width / img.height;
+        if (imgAspect > 1) {
+          drawW = drawH * imgAspect;
+        } else {
+          drawH = drawW / imgAspect;
+        }
+
+        ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+        ctx.restore();
+
+        croppedDataUrl = canvas.toDataURL('image/jpeg', 0.95);
+      }
+    } catch (cropErr) {
+      console.warn('Canvas crop generation failed, using fallback:', cropErr);
+    }
+
+    const newTransform = {
+      scale: cropScale,
+      rotation: cropRot,
+      mask: cropMask,
+      x: cropPan.x,
+      y: cropPan.y
+    };
+
+    const targetIdx = images.findIndex(im => im.id === cropTarget.id);
+
+    setImages(prev => prev.map(im => {
+      if (im.id === cropTarget.id) {
+        return {
+          ...im,
+          originalSrc: cropTarget.originalSrc || im.originalSrc || im.src,
+          src: croppedDataUrl,
+          previewUrl: croppedDataUrl,
+          isCropped: true,
+          transform: newTransform
+        };
+      }
+      return im;
+    }));
+
+    if (activeOrder && (isButterfly(activeOrder) || isMagazine(activeOrder))) {
+      if (targetIdx !== -1) {
+        setButterflyCrops(prev => ({
+          ...prev,
+          [targetIdx]: {
+            scale: cropScale,
+            rotation: cropRot,
+            x: cropPan.x,
+            y: cropPan.y
+          },
+          [cropTarget.id]: {
+            scale: cropScale,
+            rotation: cropRot,
+            x: cropPan.x,
+            y: cropPan.y
+          }
+        }));
+      }
+    }
+
+    if (images[0]?.id === cropTarget.id || targetIdx === 0) {
+      setLivePreviewPhoto(croppedDataUrl);
+    }
+
+    setCropOpen(false);
+    showToast(`Crop applied to ${cropTarget.name}`, 'success');
+  };
   const handleDragStart = (_e: React.DragEvent, idx: number) => setDragIndex(idx);
   const handleDropCard  = (_e: React.DragEvent, idx: number) => {
     if (dragIndex === null || dragIndex === idx) return;
@@ -1771,6 +1895,18 @@ export default function CustomerPortal({
       const a = [...prev];
       [a[idx], a[target]] = [a[target], a[idx]];
       return a;
+    });
+  };
+
+  const removeImage = (id: string) => {
+    setImages(prev => {
+      const filtered = prev.filter(img => img.id !== id);
+      if (filtered.length === 0) {
+        setLivePreviewPhoto(null);
+      } else if (livePreviewPhoto && !filtered.some(img => (img.previewUrl || img.src || img.url) === livePreviewPhoto)) {
+        setLivePreviewPhoto(filtered[0].previewUrl || filtered[0].src || filtered[0].url || null);
+      }
+      return filtered;
     });
   };
 
@@ -3203,6 +3339,55 @@ export default function CustomerPortal({
                           </div>
                         )}
 
+                        {/* Uploaded photos preview */}
+                        {order.images && order.images.length > 0 && (
+                          <div style={{ margin: '10px 0 14px', background: 'rgba(23, 28, 98, 0.03)', border: '1px solid rgba(23, 28, 98, 0.08)', borderRadius: 12, padding: '10px 12px' }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <i className="bi bi-images" style={{ color: 'var(--accent)' }} />
+                              Uploaded Photos ({order.images.length})
+                              <span style={{ fontSize: 10, color: 'var(--text-tertiary)', fontWeight: 500 }}>(Click any photo to view full-size)</span>
+                            </div>
+                            <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
+                              {(order.images || []).map((img: any, i: number) => {
+                                const imgSrc = img.previewUrl || img.src || img.url || '';
+                                return (
+                                  <div
+                                    key={img.id || i}
+                                    style={{ width: 56, height: 56, borderRadius: 8, overflow: 'hidden', border: '1.5px solid var(--border-color)', flexShrink: 0, cursor: 'pointer', background: '#fff', position: 'relative' }}
+                                    title={img.name || `Photo ${i + 1}`}
+                                    onClick={() => {
+                                      setActiveOrder(order);
+                                      setImages((order.images || []).map((im: any) => ({
+                                        id: im.id || `img-${Math.random()}`,
+                                        name: im.name || 'Photo',
+                                        src: im.previewUrl || im.src || im.url || '',
+                                        previewUrl: im.previewUrl,
+                                        url: im.url,
+                                        transform: im.transform
+                                      })));
+                                      setReviewPhotoIdx(i);
+                                    }}
+                                  >
+                                    <img
+                                      src={imgSrc}
+                                      alt={img.name || ''}
+                                      style={{
+                                        width: '100%',
+                                        height: '100%',
+                                        objectFit: 'cover',
+                                        transform: img.transform ? `scale(${img.transform.scale || 1}) rotate(${img.transform.rotation || 0}deg)` : undefined
+                                      }}
+                                    />
+                                    <div style={{ position: 'absolute', bottom: 2, right: 4, fontSize: 9, fontWeight: 800, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
+                                      {i + 1}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
                         {/* Action buttons */}
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderTop: '1px solid var(--border-color)', paddingTop: 14, marginTop: 14 }}>
                           {isCustomizable(order) && (
@@ -3324,7 +3509,7 @@ export default function CustomerPortal({
                           {/* Image */}
                           <div className="wiz-product-card-img">
                             {order.images && order.images.length > 0 ? (
-                              <img src={order.images[0].src} alt={order.product} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                              <img src={order.images[0].previewUrl || order.images[0].src || order.images[0].url} alt={order.product} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                             ) : (
                               <i className={`bi ${productIcon(order.productType)}`} />
                             )}
@@ -3676,12 +3861,27 @@ export default function CustomerPortal({
                           onDrop={(e) => handleDropCard(e, idx)}
                           title="Drag to rearrange sequence"
                         >
-                          <img src={img.src} alt={img.name} onClick={() => setReviewPhotoIdx(idx)} />
+                          <img
+                            src={img.src || img.previewUrl || img.url}
+                            alt={img.name}
+                            style={img.transform ? {
+                              transform: `scale(${img.transform.scale || 1}) rotate(${img.transform.rotation || 0}deg)`,
+                              transformOrigin: 'center center'
+                            } : undefined}
+                            onClick={() => setReviewPhotoIdx(idx)}
+                          />
                           {uploadProgress[img.id] !== undefined && uploadProgress[img.id] < 100 && (
                             <div className="wiz-upload-progress" style={{ position: 'absolute', bottom: 0, left: 0, right: 0, borderRadius: 0, margin: 0 }}>
                               <div className="wiz-upload-progress-fill" style={{ width: `${uploadProgress[img.id]}%` }} />
                             </div>
                           )}
+                          <button
+                            className="wiz-thumb-crop"
+                            onClick={e => { e.stopPropagation(); openCrop(img); }}
+                            title="Crop & Rotate photo"
+                          >
+                            <i className="bi bi-crop" />
+                          </button>
                           <button className="wiz-thumb-remove" onClick={e => { e.stopPropagation(); removeImage(img.id); }}>
                             <i className="bi bi-x" />
                           </button>
@@ -4121,8 +4321,15 @@ export default function CustomerPortal({
                         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 10 }}>Uploaded Photos ({images.length})</div>
                         <div className="wiz-thumb-strip">
                           {images.map((img, idx) => (
-                            <div key={img.id} className="wiz-thumb">
-                              <img src={img.src} alt={img.name} onClick={() => setReviewPhotoIdx(idx)} />
+                            <div key={img.id} className="wiz-thumb" style={{ cursor: 'pointer' }} onClick={() => setReviewPhotoIdx(idx)} title="Click to view full photo">
+                              <img
+                                src={img.previewUrl || img.src || img.url}
+                                alt={img.name}
+                                style={img.transform ? {
+                                  transform: `scale(${img.transform.scale || 1}) rotate(${img.transform.rotation || 0}deg)`,
+                                  transformOrigin: 'center center'
+                                } : undefined}
+                              />
                             </div>
                           ))}
                         </div>
@@ -4206,9 +4413,43 @@ export default function CustomerPortal({
                   <i className="bi bi-check-lg" />
                 </div>
                 <h2 style={{ fontSize: 32, fontWeight: 900, color: 'var(--primary)', margin: '0 0 10px' }}>Photos Submitted Successfully! 🎉</h2>
-                <p style={{ fontSize: 16, color: 'var(--text-secondary)', maxWidth: 480, lineHeight: 1.7, margin: '0 0 32px' }}>
+                <p style={{ fontSize: 16, color: 'var(--text-secondary)', maxWidth: 480, lineHeight: 1.7, margin: '0 0 24px' }}>
                   Your personalization details have been received and your order is now being processed for printing. We'll keep you posted with WhatsApp updates.
                 </p>
+
+                {/* Uploaded photos preview grid */}
+                {images.length > 0 && (
+                  <div style={{ marginBottom: 28, width: '100%', maxWidth: 540 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12, textAlign: 'center' }}>
+                      Uploaded Photos ({images.length})
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', maxHeight: 220, overflowY: 'auto', padding: '4px' }}>
+                      {images.map((img, idx) => (
+                        <div
+                          key={img.id || idx}
+                          style={{ width: 64, height: 64, borderRadius: 10, overflow: 'hidden', border: '2px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', cursor: 'pointer', background: '#fff', position: 'relative' }}
+                          onClick={() => setReviewPhotoIdx(idx)}
+                          title="Click to view full photo"
+                        >
+                          <img
+                            src={img.previewUrl || img.src || img.url}
+                            alt={img.name}
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              objectFit: 'cover',
+                              transform: img.transform ? `scale(${img.transform.scale || 1}) rotate(${img.transform.rotation || 0}deg)` : undefined
+                            }}
+                          />
+                          <div style={{ position: 'absolute', bottom: 2, right: 4, fontSize: 9, fontWeight: 800, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
+                            {idx + 1}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', justifyContent: 'center' }}>
                   <button className="wiz-btn-next" onClick={() => { navTo('tracking'); }}>
                     <i className="bi bi-geo-alt-fill" /> Track My Order
@@ -4827,6 +5068,54 @@ export default function CustomerPortal({
                     </div>
                   )}
 
+                  {/* Uploaded photos gallery */}
+                  {order.images && order.images.length > 0 && (
+                    <div style={{ marginTop: 24, background: 'rgba(23, 28, 98, 0.03)', border: '1px solid rgba(23, 28, 98, 0.08)', borderRadius: 16, padding: '16px 20px' }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--primary)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <i className="bi bi-images" style={{ color: 'var(--accent)' }} />
+                        Uploaded Photos ({order.images.length})
+                        <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 500 }}>(Click any photo to view full size)</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 6 }}>
+                        {(order.images || []).map((img: any, i: number) => {
+                          const imgSrc = img.previewUrl || img.src || img.url || '';
+                          return (
+                            <div
+                              key={img.id || i}
+                              style={{ width: 68, height: 68, borderRadius: 10, overflow: 'hidden', border: '1.5px solid var(--border-color)', flexShrink: 0, cursor: 'pointer', background: '#fff', position: 'relative' }}
+                              title={img.name || `Photo ${i + 1}`}
+                              onClick={() => {
+                                setImages((order.images || []).map((im: any) => ({
+                                  id: im.id || `img-${Math.random()}`,
+                                  name: im.name || 'Photo',
+                                  src: im.previewUrl || im.src || im.url || '',
+                                  previewUrl: im.previewUrl,
+                                  url: im.url,
+                                  transform: im.transform
+                                })));
+                                setReviewPhotoIdx(i);
+                              }}
+                            >
+                              <img
+                                src={imgSrc}
+                                alt={img.name || ''}
+                                style={{
+                                  width: '100%',
+                                  height: '100%',
+                                  objectFit: 'cover',
+                                  transform: img.transform ? `scale(${img.transform.scale || 1}) rotate(${img.transform.rotation || 0}deg)` : undefined
+                                }}
+                              />
+                              <div style={{ position: 'absolute', bottom: 2, right: 4, fontSize: 9, fontWeight: 800, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
+                                {i + 1}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Quick actions */}
                   <div style={{ display: 'flex', gap: 10, marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--border-color)', flexWrap: 'wrap' }}>
                     {order.trackingUrl && (
@@ -5034,9 +5323,16 @@ export default function CustomerPortal({
 
             <div style={{ position: 'relative', borderRadius: 12, overflow: 'hidden', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 320 }}>
               <img
-                src={images[reviewPhotoIdx].src}
+                src={images[reviewPhotoIdx].previewUrl || images[reviewPhotoIdx].src || images[reviewPhotoIdx].url}
                 alt={images[reviewPhotoIdx].name}
-                style={{ maxWidth: '100%', maxHeight: '70vh', display: 'block', margin: 'auto', objectFit: 'contain' }}
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: '70vh',
+                  display: 'block',
+                  margin: 'auto',
+                  objectFit: 'contain',
+                  transform: images[reviewPhotoIdx].transform ? `scale(${images[reviewPhotoIdx].transform?.scale || 1}) rotate(${images[reviewPhotoIdx].transform?.rotation || 0}deg)` : undefined
+                }}
               />
               {images.length > 1 && (
                 <>
@@ -5064,14 +5360,7 @@ export default function CustomerPortal({
               {images[reviewPhotoIdx].name}
             </div>
 
-            <div className="flex gap-2" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
-              <button className="btn btn-outline" onClick={() => { removeImage(images[reviewPhotoIdx]!.id); setReviewPhotoIdx(null); }}>
-                <i className="bi bi-trash" /> Remove This Photo
-              </button>
-              <button className="btn btn-primary" onClick={() => setReviewPhotoIdx(null)}>
-                <i className="bi bi-check-lg" /> Looks Good
-              </button>
-            </div>
+
           </div>
         </div>
       )}
@@ -5081,41 +5370,214 @@ export default function CustomerPortal({
           ======================================================================= */}
       {cropOpen && cropTarget && (
         <div className="modal-overlay active" onClick={() => setCropOpen(false)}>
-          <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
+          <div className="modal-container" onClick={e => e.stopPropagation()} style={{ maxWidth: 480, padding: 24, borderRadius: 20 }}>
             <div className="flex align-center justify-between" style={{ marginBottom: '1rem' }}>
-              <h2 style={{ fontWeight: 700, color: 'var(--primary)', margin: 0, fontSize: '1.1rem' }}>Crop Image</h2>
-              <button className="btn btn-outline btn-sm" onClick={() => setCropOpen(false)}><i className="bi bi-x-lg" /></button>
+              <div>
+                <h2 style={{ fontWeight: 800, color: 'var(--primary)', margin: 0, fontSize: '1.2rem' }}>Crop & Adjust Photo</h2>
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>{cropTarget.name}</div>
+              </div>
+              <button className="btn btn-outline btn-sm" onClick={() => setCropOpen(false)} style={{ borderRadius: '50%', width: 32, height: 32, padding: 0 }}>
+                <i className="bi bi-x-lg" />
+              </button>
             </div>
 
-            <div className="crop-frame-box" style={{ marginBottom: '1rem', position: 'relative', overflow: 'hidden' }}>
-              <img className="crop-img-target" src={cropTarget.src} alt="Crop" style={{ transform: `scale(${cropScale}) rotate(${cropRot}deg)`, transition: 'transform 0.2s', maxWidth: '100%', display: 'block', margin: 'auto' }} />
-              <div className="crop-border-mask" style={{ borderRadius: cropMask === 'circle' ? '50%' : cropMask === 'square' ? '4px' : '2px', aspectRatio: cropMask === 'rect' ? '16/9' : '1/1' }} />
+            {/* Interactive Crop Viewport with Drag / Pan */}
+            <div
+              style={{
+                position: 'relative',
+                width: 280,
+                height: 280,
+                margin: '0 auto 16px',
+                borderRadius: cropMask === 'circle' ? '50%' : 14,
+                overflow: 'hidden',
+                background: '#0f172a',
+                border: '2.5px solid #3b82f6',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+                cursor: cropIsDragging ? 'grabbing' : 'grab',
+                userSelect: 'none',
+                touchAction: 'none'
+              }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                setCropIsDragging(true);
+                cropDragStartRef.current = { x: e.clientX, y: e.clientY, panX: cropPan.x, panY: cropPan.y };
+              }}
+              onMouseMove={(e) => {
+                if (!cropIsDragging) return;
+                e.preventDefault();
+                const dx = e.clientX - cropDragStartRef.current.x;
+                const dy = e.clientY - cropDragStartRef.current.y;
+                setCropPan({
+                  x: Math.round(cropDragStartRef.current.panX + dx),
+                  y: Math.round(cropDragStartRef.current.panY + dy)
+                });
+              }}
+              onMouseUp={() => setCropIsDragging(false)}
+              onMouseLeave={() => setCropIsDragging(false)}
+              onTouchStart={(e) => {
+                if (e.touches.length === 1) {
+                  setCropIsDragging(true);
+                  cropDragStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, panX: cropPan.x, panY: cropPan.y };
+                }
+              }}
+              onTouchMove={(e) => {
+                if (!cropIsDragging || e.touches.length !== 1) return;
+                const dx = e.touches[0].clientX - cropDragStartRef.current.x;
+                const dy = e.touches[0].clientY - cropDragStartRef.current.y;
+                setCropPan({
+                  x: Math.round(cropDragStartRef.current.panX + dx),
+                  y: Math.round(cropDragStartRef.current.panY + dy)
+                });
+              }}
+              onTouchEnd={() => setCropIsDragging(false)}
+            >
+              <img
+                src={cropTarget.originalSrc || cropTarget.src || cropTarget.previewUrl || cropTarget.url}
+                alt="Crop Target"
+                draggable={false}
+                onLoad={(e) => {
+                  const img = e.currentTarget;
+                  const aspect = img.naturalWidth / img.naturalHeight;
+                  if (aspect > 1) {
+                    setCropBaseDims({ width: Math.round(280 * aspect), height: 280 });
+                  } else {
+                    setCropBaseDims({ width: 280, height: Math.round(280 / aspect) });
+                  }
+                }}
+                style={{
+                  position: 'absolute',
+                  left: '50%',
+                  top: '50%',
+                  transform: `translate(calc(-50% + ${cropPan.x}px), calc(-50% + ${cropPan.y}px)) scale(${cropScale}) rotate(${cropRot}deg)`,
+                  transformOrigin: 'center center',
+                  width: cropBaseDims.width,
+                  height: cropBaseDims.height,
+                  maxWidth: 'none',
+                  maxHeight: 'none',
+                  pointerEvents: 'none',
+                  transition: cropIsDragging ? 'none' : 'transform 0.1s ease-out'
+                }}
+              />
+
+              {/* Grid overlay */}
+              <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gridTemplateRows: '1fr 1fr 1fr' }}>
+                <div style={{ borderRight: '1px dashed rgba(255,255,255,0.3)', borderBottom: '1px dashed rgba(255,255,255,0.3)' }} />
+                <div style={{ borderRight: '1px dashed rgba(255,255,255,0.3)', borderBottom: '1px dashed rgba(255,255,255,0.3)' }} />
+                <div style={{ borderBottom: '1px dashed rgba(255,255,255,0.3)' }} />
+                <div style={{ borderRight: '1px dashed rgba(255,255,255,0.3)', borderBottom: '1px dashed rgba(255,255,255,0.3)' }} />
+                <div style={{ borderRight: '1px dashed rgba(255,255,255,0.3)', borderBottom: '1px dashed rgba(255,255,255,0.3)' }} />
+                <div style={{ borderBottom: '1px dashed rgba(255,255,255,0.3)' }} />
+                <div style={{ borderRight: '1px dashed rgba(255,255,255,0.3)' }} />
+                <div style={{ borderRight: '1px dashed rgba(255,255,255,0.3)' }} />
+                <div />
+              </div>
+
+              {/* Drag badge */}
+              <div style={{ position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)', background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)', color: '#fff', fontSize: 10, fontWeight: 600, padding: '3px 10px', borderRadius: 20, pointerEvents: 'none', display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+                <i className="bi bi-arrows-move" /> Drag to reposition
+              </div>
             </div>
 
-            <div className="flex gap-2" style={{ marginBottom: '0.75rem' }}>
-              {(['circle', 'square', 'rect'] as CropMaskType[]).map(m => (
-                <button key={m} className={`btn btn-sm${cropMask === m ? ' btn-navy' : ' btn-outline'}`} style={{ flex: 1, textTransform: 'capitalize' }} onClick={() => setCropMask(m)}>
-                  {m === 'circle' && <i className="bi bi-circle" />}
-                  {m === 'square' && <i className="bi bi-square" />}
-                  {m === 'rect'   && <i className="bi bi-aspect-ratio" />}
-                  {m}
+            {/* Shape & Reset buttons */}
+            <div className="flex gap-2" style={{ marginBottom: '1rem' }}>
+              {(['square', 'circle'] as CropMaskType[]).map(m => (
+                <button
+                  key={m}
+                  className={`btn btn-sm${cropMask === m ? ' btn-navy' : ' btn-outline'}`}
+                  style={{ flex: 1, textTransform: 'capitalize', fontWeight: 600 }}
+                  onClick={() => setCropMask(m)}
+                >
+                  {m === 'circle' && <i className="bi bi-circle" style={{ marginRight: 4 }} />}
+                  {m === 'square' && <i className="bi bi-square" style={{ marginRight: 4 }} />}
+                  {m === 'square' ? 'Square Cut' : 'Round Cut'}
                 </button>
               ))}
+              <button
+                className="btn btn-sm btn-outline"
+                style={{ flex: 0.8, color: 'var(--text-secondary)', fontWeight: 600 }}
+                onClick={() => {
+                  setCropScale(1);
+                  setCropRot(0);
+                  setCropPan({ x: 0, y: 0 });
+                }}
+                title="Reset crop"
+              >
+                <i className="bi bi-arrow-counterclockwise" style={{ marginRight: 4 }} /> Reset
+              </button>
             </div>
 
-            <div className="flex flex-col gap-2" style={{ marginBottom: '0.75rem' }}>
-              <label className="label flex align-center justify-between"><span>Scale</span><span className="text-xs text-muted">{Math.round(cropScale * 100)}%</span></label>
-              <input type="range" min="0.5" max="3" step="0.05" value={cropScale} onChange={e => setCropScale(Number(e.target.value))} style={{ width: '100%' }} />
+            {/* Zoom Slider */}
+            <div className="flex flex-col gap-1" style={{ marginBottom: '0.85rem' }}>
+              <div className="flex align-center justify-between">
+                <label className="label" style={{ margin: 0, fontSize: 12, fontWeight: 700 }}>
+                  <i className="bi bi-zoom-in" style={{ marginRight: 6, color: 'var(--primary)' }} />
+                  Zoom
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button
+                    className="btn btn-outline btn-sm"
+                    style={{ width: 24, height: 24, padding: 0, borderRadius: '50%', fontWeight: 700 }}
+                    onClick={() => setCropScale(s => Math.max(0.8, Number((s - 0.1).toFixed(2))))}
+                  >
+                    −
+                  </button>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--primary)', minWidth: 42, textAlign: 'center' }}>
+                    {Math.round(cropScale * 100)}%
+                  </span>
+                  <button
+                    className="btn btn-outline btn-sm"
+                    style={{ width: 24, height: 24, padding: 0, borderRadius: '50%', fontWeight: 700 }}
+                    onClick={() => setCropScale(s => Math.min(3, Number((s + 0.1).toFixed(2))))}
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+              <input
+                type="range"
+                min="0.8"
+                max="3"
+                step="0.05"
+                value={cropScale}
+                onChange={e => setCropScale(Number(e.target.value))}
+                style={{ width: '100%', cursor: 'pointer' }}
+              />
             </div>
 
-            <div className="flex flex-col gap-2" style={{ marginBottom: '1rem' }}>
-              <label className="label flex align-center justify-between"><span>Rotation</span><span className="text-xs text-muted">{cropRot}°</span></label>
-              <input type="range" min="-180" max="180" step="1" value={cropRot} onChange={e => setCropRot(Number(e.target.value))} style={{ width: '100%' }} />
+            {/* Rotation Slider */}
+            <div className="flex flex-col gap-1" style={{ marginBottom: '1.25rem' }}>
+              <div className="flex align-center justify-between">
+                <label className="label" style={{ margin: 0, fontSize: 12, fontWeight: 700 }}>
+                  <i className="bi bi-arrow-repeat" style={{ marginRight: 6, color: 'var(--primary)' }} />
+                  Rotation
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button
+                    className="btn btn-outline btn-sm"
+                    style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6 }}
+                    onClick={() => setCropRot(r => (r + 90) % 360)}
+                  >
+                    <i className="bi bi-arrow-clockwise" /> 90° Turn
+                  </button>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--primary)', minWidth: 36, textAlign: 'right' }}>
+                    {cropRot}°
+                  </span>
+                </div>
+              </div>
+              <input
+                type="range"
+                min="-180"
+                max="180"
+                step="1"
+                value={cropRot}
+                onChange={e => setCropRot(Number(e.target.value))}
+                style={{ width: '100%', cursor: 'pointer' }}
+              />
             </div>
 
             <div className="flex gap-2" style={{ justifyContent: 'flex-end' }}>
               <button className="btn btn-secondary" onClick={() => setCropOpen(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={() => { setCropOpen(false); showToast(`Crop applied to ${cropTarget.name}`, 'success'); }}>
+              <button className="btn btn-primary" onClick={handleApplyCrop} style={{ background: '#171C62', color: '#fff', fontWeight: 700 }}>
                 <i className="bi bi-check-lg" /> Apply Crop
               </button>
             </div>

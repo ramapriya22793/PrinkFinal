@@ -246,7 +246,17 @@ router.get('/customer/orders', authMiddleware(), async (req, res) => {
     // ── Deduplicate customer orders to eliminate legacy bare-id parent records ──
     const { deduplicateOrders, cleanupDuplicateOrdersInDb } = require('../utils/orderDeduplication');
     const { cleanOrders, duplicateIdsToDelete, mergesToPerform } = deduplicateOrders(customerOrders);
-    customerOrders = cleanOrders;
+    customerOrders = cleanOrders.map(order => {
+      if (order.images && Array.isArray(order.images)) {
+        order.images = order.images.map(img => ({
+          ...img,
+          src: img.previewUrl || img.src || img.url,
+          url: img.url || img.src || img.previewUrl,
+          previewUrl: img.previewUrl || img.src || img.url
+        }));
+      }
+      return order;
+    });
 
     if (duplicateIdsToDelete.length > 0 || mergesToPerform.length > 0) {
       setImmediate(() => {
@@ -528,6 +538,7 @@ router.post('/:id/upload', authMiddleware(), (req, res) => {
         id: `img_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
         name: path.basename(req.file.originalname).slice(0, 120),
         originalKey: path.join('originals', req.file.filename),
+        src: `/uploads/previews/${previewName}`,
         previewUrl: `/uploads/previews/${previewName}`,
         url: `/uploads/originals/${req.file.filename}`,
         mimeType: req.file.mimetype,

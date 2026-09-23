@@ -59,10 +59,20 @@ router.get('/export', adminMiddleware, async (_req, res) => {
   }
 });
 
-// Both create and edit hit this — db.saveSkuMapping upserts on the sku code.
+// Create new SKU mapping
 router.post('/', adminMiddleware, async (req, res) => {
   try {
     const sku = await db.saveSkuMapping(req.body);
+    res.json({ success: true, sku });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Update existing SKU mapping
+router.put('/:id', adminMiddleware, async (req, res) => {
+  try {
+    const sku = await db.saveSkuMapping({ ...req.body, id: req.params.id });
     res.json({ success: true, sku });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
