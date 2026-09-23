@@ -1,5 +1,5 @@
 // =========================================================================
-// THE PRINK — Shared TypeScript Types (Expanded - Release 2026-09-23)
+// THE PRINK — Shared TypeScript Types (Expanded)
 // =========================================================================
 
 export type PortalType = 'customer' | 'admin' | 'printer';

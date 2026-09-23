@@ -382,10 +382,19 @@ export default function CustomerPortal({
                   borderRadius: '2px', 
                   overflow: 'hidden',
                   position: 'relative',
-                  aspectRatio: '4/3' // Ensure landscape aspect ratio
-                }}>
+                  aspectRatio: '4/3', // Ensure landscape aspect ratio
+                  cursor: images[idx] ? 'pointer' : 'default'
+                }}
+                onClick={() => { if (images[idx]) openCrop(images[idx]); }}
+                title={images[idx] ? `Click to crop Photo ${idx + 1}` : undefined}
+                >
                   {images[idx] ? (
-                    <img src={images[idx].src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    <>
+                      <img src={images[idx].src || images[idx].previewUrl || images[idx].url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <div style={{ position: 'absolute', bottom: 2, right: 2, background: 'rgba(23,28,98,0.75)', color: '#fff', borderRadius: 4, padding: '1px 4px', fontSize: 8, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 2 }}>
+                        <i className="bi bi-crop" /> {images[idx].isCropped ? '✓' : 'Crop'}
+                      </div>
+                    </>
                   ) : (
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#94a3b8', fontSize: '10px' }}>{idx + 1}</div>
                   )}
@@ -400,6 +409,8 @@ export default function CustomerPortal({
 
   const renderButterfly3D = (isReview = false) => {
     const getCropTransform = (idx: number) => {
+      const img = images[idx];
+      if (img && img.isCropped) return 'none';
       const crop = butterflyCrops[idx];
       if (!crop) return 'none';
       return `scale(${crop.scale}) rotate(${crop.rotation}deg) translate(${crop.x}px, ${crop.y}px)`;
@@ -503,31 +514,59 @@ export default function CustomerPortal({
                     }}
                   >
                     {/* INSIDE of the flap (Faces Up when open, Inward when closed) */}
-                    <div style={{ 
-                      position: 'absolute', inset: 0, backfaceVisibility: 'hidden', 
-                      background: '#fdf4ff', border: '2px solid #fbcfe8',
-                      display: 'flex', flexDirection: 'column', padding: '6px',
-                      boxShadow: 'inset 0 0 10px rgba(0,0,0,0.05)'
-                    }}>
-                      <div style={{ width: '100%', height: '100%', background: '#ffffff', borderRadius: '2px', overflow: 'hidden' }}>
+                    <div 
+                      style={{ 
+                        position: 'absolute', inset: 0, backfaceVisibility: 'hidden', 
+                        background: '#fdf4ff', border: '2px solid #fbcfe8',
+                        display: 'flex', flexDirection: 'column', padding: '6px',
+                        boxShadow: 'inset 0 0 10px rgba(0,0,0,0.05)',
+                        cursor: images[flap.idxSmall] ? 'pointer' : 'default'
+                      }}
+                      onClick={(e) => {
+                        if (images[flap.idxSmall]) {
+                          e.stopPropagation();
+                          openCrop(images[flap.idxSmall]);
+                        }
+                      }}
+                      title={images[flap.idxSmall] ? "Click to crop photo" : undefined}
+                    >
+                      <div style={{ width: '100%', height: '100%', background: '#ffffff', borderRadius: '2px', overflow: 'hidden', position: 'relative' }}>
                         {images[flap.idxSmall] ? (
-                          <img src={images[flap.idxSmall].src} style={{ width: '100%', height: '100%', objectFit: 'cover', transform: getCropTransform(flap.idxSmall) }} />
+                          <>
+                            <img src={images[flap.idxSmall].src} style={{ width: '100%', height: '100%', objectFit: 'cover', transform: getCropTransform(flap.idxSmall) }} />
+                            <div style={{ position: 'absolute', bottom: 2, right: 2, background: 'rgba(23,28,98,0.75)', color: '#fff', borderRadius: 4, padding: '1px 4px', fontSize: 8, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 2 }}>
+                              <i className="bi bi-crop" /> {images[flap.idxSmall].isCropped ? '✓' : 'Crop'}
+                            </div>
+                          </>
                         ) : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f472b6', fontSize: '10px' }}>PHOTO</div>}
                       </div>
                     </div>
                     {/* OUTSIDE of the flap (Faces Down when open, Outward when closed) */}
-                    <div style={{ 
-                      position: 'absolute', inset: 0, backfaceVisibility: 'hidden', 
-                      transform: 'rotateY(180deg)',
-                      background: 'linear-gradient(135deg, #f43f5e 0%, #a855f7 100%)', 
-                      border: '1px solid #d946ef',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      padding: '6px'
-                    }}>
+                    <div 
+                      style={{ 
+                        position: 'absolute', inset: 0, backfaceVisibility: 'hidden', 
+                        transform: 'rotateY(180deg)',
+                        background: 'linear-gradient(135deg, #f43f5e 0%, #a855f7 100%)', 
+                        border: '1px solid #d946ef',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        padding: '6px',
+                        cursor: images[flap.idxLarge] ? 'pointer' : 'default'
+                      }}
+                      onClick={(e) => {
+                        if (images[flap.idxLarge]) {
+                          e.stopPropagation();
+                          openCrop(images[flap.idxLarge]);
+                        }
+                      }}
+                      title={images[flap.idxLarge] ? "Click to crop photo" : undefined}
+                    >
                       <div style={{ width: '100%', height: '100%', transform: `rotateZ(${flap.outRot}deg)` }}>
                         {images[flap.idxLarge] ? (
-                          <div style={{ width: '100%', height: '100%', borderRadius: '2px', overflow: 'hidden' }}>
+                          <div style={{ width: '100%', height: '100%', borderRadius: '2px', overflow: 'hidden', position: 'relative' }}>
                             <img src={images[flap.idxLarge].src} style={{ width: '100%', height: '100%', objectFit: 'cover', transform: getCropTransform(flap.idxLarge) }} />
+                            <div style={{ position: 'absolute', bottom: 2, right: 2, background: 'rgba(23,28,98,0.75)', color: '#fff', borderRadius: 4, padding: '1px 4px', fontSize: 8, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 2 }}>
+                              <i className="bi bi-crop" /> {images[flap.idxLarge].isCropped ? '✓' : 'Crop'}
+                            </div>
                           </div>
                         ) : (
                           <div style={{ width: '100%', height: '100%', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '2px' }}>
@@ -1314,15 +1353,19 @@ export default function CustomerPortal({
       const payload = {
         designData: JSON.stringify(designConfig),
         customizationStatus: 'completed',
-        images: images.length > 0 ? images.map(img => ({
-          id: img.id,
-          name: img.name,
-          src: (img.src && img.src.startsWith('data:')) ? img.src : (img.previewUrl || img.url || img.src),
-          url: (img.src && img.src.startsWith('data:')) ? img.src : (img.url || img.previewUrl || img.src),
-          previewUrl: (img.src && img.src.startsWith('data:')) ? img.src : (img.previewUrl || img.url || img.src),
-          serverFilename: img.serverFilename || img.name,
-          transform: img.transform || (canonicalTransform ? canonicalTransform : undefined)
-        })) : (livePreviewPhoto ? [{ id: 'img_1', name: 'upload.jpg', src: livePreviewPhoto, url: livePreviewPhoto, serverFilename: 'upload.jpg', ...(canonicalTransform ? { transform: canonicalTransform } : {}) }] : [])
+        images: images.length > 0 ? images.map(img => {
+          const isUploadedUrl = img.url && !img.url.startsWith('data:');
+          const finalUrl = isUploadedUrl ? img.url : (img.previewUrl && !img.previewUrl.startsWith('data:') ? img.previewUrl : img.src);
+          return {
+            id: img.id,
+            name: img.name,
+            src: (img.src && img.src.startsWith('data:')) ? img.src : (finalUrl || img.src),
+            url: finalUrl || img.url || img.src,
+            previewUrl: finalUrl || img.previewUrl || img.src,
+            serverFilename: img.serverFilename || img.name,
+            transform: img.transform || (canonicalTransform ? canonicalTransform : undefined)
+          };
+        }) : (livePreviewPhoto ? [{ id: 'img_1', name: 'upload.jpg', src: livePreviewPhoto, url: livePreviewPhoto, serverFilename: 'upload.jpg', ...(canonicalTransform ? { transform: canonicalTransform } : {}) }] : [])
       };
       
       const res = await fetch(`/api/orders/${encodeURIComponent(activeOrder.id)}/design`, {
@@ -1780,12 +1823,26 @@ export default function CustomerPortal({
     try {
       const sourceUrl = cropTarget.originalSrc || cropTarget.src || cropTarget.previewUrl || cropTarget.url || '';
       const img = new Image();
-      img.crossOrigin = 'anonymous';
+      let objectUrlToRevoke: string | null = null;
+      try {
+        const response = await fetch(sourceUrl);
+        if (response.ok) {
+          const blob = await response.blob();
+          objectUrlToRevoke = URL.createObjectURL(blob);
+          img.src = objectUrlToRevoke;
+        } else {
+          img.crossOrigin = 'anonymous';
+          img.src = sourceUrl;
+        }
+      } catch {
+        img.crossOrigin = 'anonymous';
+        img.src = sourceUrl;
+      }
+
       const loadPromise = new Promise<void>((resolve, reject) => {
         img.onload = () => resolve();
         img.onerror = () => reject(new Error('Failed to load image'));
       });
-      img.src = sourceUrl;
       await loadPromise;
 
       const canvas = document.createElement('canvas');
@@ -1820,6 +1877,9 @@ export default function CustomerPortal({
         ctx.restore();
 
         croppedDataUrl = canvas.toDataURL('image/jpeg', 0.95);
+      }
+      if (objectUrlToRevoke) {
+        URL.revokeObjectURL(objectUrlToRevoke);
       }
     } catch (cropErr) {
       console.warn('Canvas crop generation failed, using fallback:', cropErr);
@@ -1871,6 +1931,30 @@ export default function CustomerPortal({
 
     if (images[0]?.id === cropTarget.id || targetIdx === 0) {
       setLivePreviewPhoto(croppedDataUrl);
+    }
+
+    // Convert cropped data URL to File and upload immediately to server
+    const dataURLtoFile = (dataurl: string, filename: string): File => {
+      const arr = dataurl.split(',');
+      const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
+      const bstr = atob(arr[1]);
+      let n = bstr.length;
+      const u8arr = new Uint8Array(n);
+      while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+      }
+      return new File([u8arr], filename, { type: mime });
+    };
+
+    if (croppedDataUrl && croppedDataUrl.startsWith('data:')) {
+      try {
+        const safeName = cropTarget.name ? `cropped_${cropTarget.name.replace(/\.[^/.]+$/, '')}.jpg` : `cropped_${Date.now()}.jpg`;
+        const croppedFile = dataURLtoFile(croppedDataUrl, safeName);
+        const progressTimer = simulateProgress(cropTarget.id);
+        uploadOne(croppedFile, cropTarget.id, progressTimer);
+      } catch (uploadErr) {
+        console.warn('Background upload of cropped image failed:', uploadErr);
+      }
     }
 
     setCropOpen(false);
@@ -3849,62 +3933,81 @@ export default function CustomerPortal({
                       </div>
                     )}
 
+                    <div className="wiz-crop-tip-banner">
+                      <i className="bi bi-lightbulb-fill" />
+                      <span><strong>Tip:</strong> Click <strong>Crop Photo</strong> below any photo to zoom, rotate, and adjust its position.</span>
+                    </div>
+
                     <div className="wiz-thumb-strip">
                       {images.map((img, idx) => (
-                        <div
-                          key={img.id}
-                          className="wiz-thumb"
-                          style={{ animationDelay: `${idx * 0.06}s`, cursor: 'grab' }}
-                          draggable
-                          onDragStart={(e) => handleDragStart(e, idx)}
-                          onDragOver={(e) => e.preventDefault()}
-                          onDrop={(e) => handleDropCard(e, idx)}
-                          title="Drag to rearrange sequence"
-                        >
-                          <img
-                            src={img.src || img.previewUrl || img.url}
-                            alt={img.name}
-                            style={img.transform ? {
-                              transform: `scale(${img.transform.scale || 1}) rotate(${img.transform.rotation || 0}deg)`,
-                              transformOrigin: 'center center'
-                            } : undefined}
-                            onClick={() => setReviewPhotoIdx(idx)}
-                          />
-                          {uploadProgress[img.id] !== undefined && uploadProgress[img.id] < 100 && (
-                            <div className="wiz-upload-progress" style={{ position: 'absolute', bottom: 0, left: 0, right: 0, borderRadius: 0, margin: 0 }}>
-                              <div className="wiz-upload-progress-fill" style={{ width: `${uploadProgress[img.id]}%` }} />
-                            </div>
-                          )}
-                          <button
-                            className="wiz-thumb-crop"
-                            onClick={e => { e.stopPropagation(); openCrop(img); }}
-                            title="Crop & Rotate photo"
+                        <div key={img.id} className="wiz-thumb-wrapper">
+                          <div
+                            className="wiz-thumb"
+                            style={{ animationDelay: `${idx * 0.06}s`, cursor: 'grab' }}
+                            draggable
+                            onDragStart={(e) => handleDragStart(e, idx)}
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={(e) => handleDropCard(e, idx)}
+                            title="Drag to rearrange sequence"
                           >
-                            <i className="bi bi-crop" />
+                            <img
+                              src={img.src || img.previewUrl || img.url}
+                              alt={img.name}
+                              style={img.transform ? {
+                                transform: `scale(${img.transform.scale || 1}) rotate(${img.transform.rotation || 0}deg)`,
+                                transformOrigin: 'center center'
+                              } : undefined}
+                              onClick={() => setReviewPhotoIdx(idx)}
+                            />
+                            {uploadProgress[img.id] !== undefined && uploadProgress[img.id] < 100 && (
+                              <div className="wiz-upload-progress" style={{ position: 'absolute', bottom: 0, left: 0, right: 0, borderRadius: 0, margin: 0 }}>
+                                <div className="wiz-upload-progress-fill" style={{ width: `${uploadProgress[img.id]}%` }} />
+                              </div>
+                            )}
+                            {img.isCropped && (
+                              <div className="wiz-thumb-badge-cropped" title="Photo cropped">
+                                <i className="bi bi-check-circle-fill" /> Cropped
+                              </div>
+                            )}
+                            <button
+                              className="wiz-thumb-crop"
+                              onClick={e => { e.stopPropagation(); openCrop(img); }}
+                              title="Crop & Rotate photo"
+                            >
+                              <i className="bi bi-crop" />
+                            </button>
+                            <button className="wiz-thumb-remove" onClick={e => { e.stopPropagation(); removeImage(img.id); }}>
+                              <i className="bi bi-x" />
+                            </button>
+                            {images.length > 1 && (
+                              <div className="wiz-thumb-move-row" onClick={e => e.stopPropagation()}>
+                                <button
+                                  className="wiz-thumb-move"
+                                  disabled={idx === 0}
+                                  title="Move earlier in sequence"
+                                  onClick={() => moveImage(idx, -1)}
+                                >
+                                  <i className="bi bi-chevron-left" />
+                                </button>
+                                <button
+                                  className="wiz-thumb-move"
+                                  disabled={idx === images.length - 1}
+                                  title="Move later in sequence"
+                                  onClick={() => moveImage(idx, 1)}
+                                >
+                                  <i className="bi bi-chevron-right" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            className={`wiz-thumb-crop-btn ${img.isCropped ? 'is-cropped' : ''}`}
+                            onClick={e => { e.stopPropagation(); openCrop(img); }}
+                            title="Crop, rotate, and zoom this photo"
+                          >
+                            <i className="bi bi-crop" /> {img.isCropped ? 'Recrop' : 'Crop Photo'}
                           </button>
-                          <button className="wiz-thumb-remove" onClick={e => { e.stopPropagation(); removeImage(img.id); }}>
-                            <i className="bi bi-x" />
-                          </button>
-                          {images.length > 1 && (
-                            <div className="wiz-thumb-move-row" onClick={e => e.stopPropagation()}>
-                              <button
-                                className="wiz-thumb-move"
-                                disabled={idx === 0}
-                                title="Move earlier in sequence"
-                                onClick={() => moveImage(idx, -1)}
-                              >
-                                <i className="bi bi-chevron-left" />
-                              </button>
-                              <button
-                                className="wiz-thumb-move"
-                                disabled={idx === images.length - 1}
-                                title="Move later in sequence"
-                                onClick={() => moveImage(idx, 1)}
-                              >
-                                <i className="bi bi-chevron-right" />
-                              </button>
-                            </div>
-                          )}
                         </div>
                       ))}
                     </div>
@@ -4132,54 +4235,167 @@ export default function CustomerPortal({
                   </div>
 
                   {/* Right: Editor Panel */}
-                  <div className="wiz-editor-panel" style={{ display: (isButterfly(activeOrder) || isMagazine(activeOrder)) ? 'none' : 'block' }}>
-                    <div style={{ fontWeight: 800, fontSize: 14, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <i className="bi bi-sliders" style={{ color: 'var(--accent)' }} /> Edit Controls
-                    </div>
+                  {/* Right: Editor Panel */}
+                  <div className="wiz-editor-panel">
+                    {(isButterfly(activeOrder) || isMagazine(activeOrder)) ? (
+                      /* DEDICATED MULTI-PHOTO CROP & POSITION SELECTOR */
+                      <div className="wiz-multi-photo-panel">
+                        <div style={{ marginBottom: 12 }}>
+                          <div style={{ fontWeight: 800, fontSize: 15, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <i className="bi bi-crop" style={{ color: 'var(--accent)' }} /> 
+                            {isMagazine(activeOrder) ? 'Magazine Pages (4 Photos)' : 'Select & Crop Photos (8 Flaps)'}
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
+                            {isMagazine(activeOrder) 
+                              ? 'Click any page below or click directly on the preview to crop each photo.'
+                              : 'Click any flap below or click directly on the 3D box flaps to crop each photo.'}
+                          </div>
+                        </div>
 
-                    {/* Zoom slider */}
-                    <div>
-                      <div className="wiz-slider-label">
-                        <span><i className="bi bi-zoom-in" style={{ marginRight: 4 }} />Zoom / Scale</span>
-                        <span style={{ color: 'var(--accent)', cursor: 'pointer', fontWeight: 800 }} onClick={() => setPhotoScale(1)}>{Math.round(photoScale * 100)}% · Reset</span>
-                      </div>
-                      <input type="range" className="wiz-slider" min="0.3" max="3.0" step="0.05" value={photoScale} onChange={e => setPhotoScale(parseFloat(e.target.value))} style={{ width: '100%' }} />
-                    </div>
-
-                    {/* Rotation slider */}
-                    <div>
-                      <div className="wiz-slider-label">
-                        <span><i className="bi bi-arrow-repeat" style={{ marginRight: 4 }} />Rotate</span>
-                        <span style={{ color: 'var(--accent)', cursor: 'pointer', fontWeight: 800 }} onClick={() => setPhotoRotation(0)}>{photoRotation}° · Reset</span>
-                      </div>
-                      <input type="range" className="wiz-slider" min="-180" max="180" step="1" value={photoRotation} onChange={e => setPhotoRotation(parseInt(e.target.value))} style={{ width: '100%' }} />
-                    </div>
-
-                    {/* Quick actions */}
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <button className="wiz-tool-btn" onClick={() => { setPhotoScale(s => Math.min(3, s + 0.1)); }}><i className="bi bi-zoom-in" />Zoom In</button>
-                      <button className="wiz-tool-btn" onClick={() => { setPhotoScale(s => Math.max(0.3, s - 0.1)); }}><i className="bi bi-zoom-out" />Zoom Out</button>
-                      <button className="wiz-tool-btn" onClick={() => { setPhotoRotation(r => r - 90); }}><i className="bi bi-arrow-counterclockwise" />−90°</button>
-                      <button className="wiz-tool-btn" onClick={() => { setPhotoRotation(r => r + 90); }}><i className="bi bi-arrow-clockwise" />+90°</button>
-                      <button className="wiz-tool-btn" style={{ flex: 1, justifyContent: 'center', color: 'var(--error)', borderColor: 'rgba(255,48,76,0.2)' }} onClick={() => { setPhotoScale(1); setPhotoRotation(0); setPhotoOffsetX(0); setPhotoOffsetY(0); }}>
-                        <i className="bi bi-arrow-counterclockwise" />Reset All
-                      </button>
-                    </div>
-
-                    {/* Thumbnail selector */}
-                    {images.length > 1 && (
-                      <div>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8 }}>Choose Preview Photo</div>
-                        <div className="wiz-thumb-strip">
-                          {images.map(img => (
-                            <div key={img.id} className="wiz-thumb"
-                              style={{ border: livePreviewPhoto === img.src ? '2.5px solid var(--accent)' : undefined }}
-                              onClick={() => setLivePreviewPhoto(img.src || null)}>
-                              <img src={img.src} alt={img.name} />
+                        {/* For Butterfly Box: Quick Toggle Open/Closed button */}
+                        {isButterfly(activeOrder) && (
+                          <div style={{ marginBottom: 14, background: '#fdf4ff', border: '1px solid #fbcfe8', borderRadius: 10, padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                            <div style={{ fontSize: 11, color: '#86198f', fontWeight: 600 }}>
+                              <i className="bi bi-info-circle-fill" style={{ marginRight: 5 }} />
+                              3D Box: <strong>{isButterflyBoxClosed ? 'Closed (Outer Flaps)' : 'Open (Inner Flaps)'}</strong>
                             </div>
-                          ))}
+                            <button
+                              type="button"
+                              className="btn btn-sm"
+                              style={{ background: '#d946ef', color: '#fff', fontWeight: 700, borderRadius: 20, fontSize: 10, padding: '3px 10px', whiteSpace: 'nowrap' }}
+                              onClick={() => setIsButterflyBoxClosed(prev => !prev)}
+                            >
+                              <i className={`bi ${isButterflyBoxClosed ? 'bi-box2-heart' : 'bi-box2-heart-fill'}`} style={{ marginRight: 4 }} />
+                              {isButterflyBoxClosed ? 'Open Box' : 'Close Box'}
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Grid of Flap Cards */}
+                        <div className="wiz-flap-grid">
+                          {(isMagazine(activeOrder) ? [
+                            { idx: 0, label: 'Page 1 · Cover', type: 'Cover' },
+                            { idx: 1, label: 'Page 2 · Inside Left', type: 'Inside' },
+                            { idx: 2, label: 'Page 3 · Inside Right', type: 'Inside' },
+                            { idx: 3, label: 'Page 4 · Back Cover', type: 'Back' },
+                          ] : [
+                            { idx: 0, label: 'Flap 1 · Top Outer', type: 'Outer' },
+                            { idx: 1, label: 'Flap 2 · Bottom Outer', type: 'Outer' },
+                            { idx: 2, label: 'Flap 3 · Left Outer', type: 'Outer' },
+                            { idx: 3, label: 'Flap 4 · Right Outer', type: 'Outer' },
+                            { idx: 4, label: 'Flap 5 · Top Inner', type: 'Inner' },
+                            { idx: 5, label: 'Flap 6 · Bottom Inner', type: 'Inner' },
+                            { idx: 6, label: 'Flap 7 · Left Inner', type: 'Inner' },
+                            { idx: 7, label: 'Flap 8 · Right Inner', type: 'Inner' },
+                          ]).map(slot => {
+                            const img = images[slot.idx];
+                            return (
+                              <div
+                                key={slot.idx}
+                                className={`wiz-flap-card ${img?.isCropped ? 'is-cropped' : ''}`}
+                              >
+                                {/* Slot label */}
+                                <div className="wiz-flap-card-header">
+                                  <span className="wiz-flap-card-title">{slot.label}</span>
+                                  <span className={`wiz-flap-card-badge ${slot.type === 'Outer' ? 'badge-outer' : 'badge-inner'}`}>
+                                    {slot.type}
+                                  </span>
+                                </div>
+
+                                {/* Thumbnail */}
+                                <div
+                                  className="wiz-flap-card-thumb"
+                                  onClick={() => { if (img) openCrop(img); }}
+                                  title={img ? `Click to crop ${slot.label}` : 'No photo uploaded'}
+                                >
+                                  {img ? (
+                                    <>
+                                      <img
+                                        src={img.src || img.previewUrl || img.url}
+                                        alt={slot.label}
+                                      />
+                                      {img.isCropped && (
+                                        <div className="wiz-flap-card-check" title="Cropped">
+                                          ✓
+                                        </div>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <div className="wiz-flap-card-empty">
+                                      Slot {slot.idx + 1}
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Action button */}
+                                {img ? (
+                                  <button
+                                    type="button"
+                                    className={`wiz-flap-crop-btn ${img.isCropped ? 'is-cropped' : ''}`}
+                                    onClick={() => openCrop(img)}
+                                  >
+                                    <i className="bi bi-crop" /> {img.isCropped ? 'Recrop' : 'Crop Photo'}
+                                  </button>
+                                ) : (
+                                  <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>No Photo</div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
+                    ) : (
+                      /* SINGLE PHOTO CONTROLS (T-shirt, Mug, Frame, Mobile Case, etc.) */
+                      <>
+                        <div style={{ fontWeight: 800, fontSize: 14, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <i className="bi bi-sliders" style={{ color: 'var(--accent)' }} /> Edit Controls
+                        </div>
+
+                        {/* Zoom slider */}
+                        <div>
+                          <div className="wiz-slider-label">
+                            <span><i className="bi bi-zoom-in" style={{ marginRight: 4 }} />Zoom / Scale</span>
+                            <span style={{ color: 'var(--accent)', cursor: 'pointer', fontWeight: 800 }} onClick={() => setPhotoScale(1)}>{Math.round(photoScale * 100)}% · Reset</span>
+                          </div>
+                          <input type="range" className="wiz-slider" min="0.3" max="3.0" step="0.05" value={photoScale} onChange={e => setPhotoScale(parseFloat(e.target.value))} style={{ width: '100%' }} />
+                        </div>
+
+                        {/* Rotation slider */}
+                        <div>
+                          <div className="wiz-slider-label">
+                            <span><i className="bi bi-arrow-repeat" style={{ marginRight: 4 }} />Rotate</span>
+                            <span style={{ color: 'var(--accent)', cursor: 'pointer', fontWeight: 800 }} onClick={() => setPhotoRotation(0)}>{photoRotation}° · Reset</span>
+                          </div>
+                          <input type="range" className="wiz-slider" min="-180" max="180" step="1" value={photoRotation} onChange={e => setPhotoRotation(parseInt(e.target.value))} style={{ width: '100%' }} />
+                        </div>
+
+                        {/* Quick actions */}
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          <button className="wiz-tool-btn" onClick={() => { setPhotoScale(s => Math.min(3, s + 0.1)); }}><i className="bi bi-zoom-in" />Zoom In</button>
+                          <button className="wiz-tool-btn" onClick={() => { setPhotoScale(s => Math.max(0.3, s - 0.1)); }}><i className="bi bi-zoom-out" />Zoom Out</button>
+                          <button className="wiz-tool-btn" onClick={() => { setPhotoRotation(r => r - 90); }}><i className="bi bi-arrow-counterclockwise" />−90°</button>
+                          <button className="wiz-tool-btn" onClick={() => { setPhotoRotation(r => r + 90); }}><i className="bi bi-arrow-clockwise" />+90°</button>
+                          <button className="wiz-tool-btn" style={{ flex: 1, justifyContent: 'center', color: 'var(--error)', borderColor: 'rgba(255,48,76,0.2)' }} onClick={() => { setPhotoScale(1); setPhotoRotation(0); setPhotoOffsetX(0); setPhotoOffsetY(0); }}>
+                            <i className="bi bi-arrow-counterclockwise" />Reset All
+                          </button>
+                        </div>
+
+                        {/* Thumbnail selector */}
+                        {images.length > 1 && (
+                          <div>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8 }}>Choose Preview Photo</div>
+                            <div className="wiz-thumb-strip">
+                              {images.map(img => (
+                                <div key={img.id} className="wiz-thumb"
+                                  style={{ border: livePreviewPhoto === img.src ? '2.5px solid var(--accent)' : undefined }}
+                                  onClick={() => setLivePreviewPhoto(img.src || null)}>
+                                  <img src={img.src} alt={img.name} />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -4189,28 +4405,9 @@ export default function CustomerPortal({
                   <button className="wiz-btn-back" onClick={() => goWizard(2, 'back')}>
                     <i className="bi bi-arrow-left" /> Back
                   </button>
-                  { (isButterfly(activeOrder) || isMagazine(activeOrder)) ? (
-                    <button 
-                      className="wiz-btn-next" 
-                      disabled={isSubmitting}
-                      onClick={async () => {
-                        setIsSubmitting(true);
-                        const success = await handleSubmitDesign();
-                        setIsSubmitting(false);
-                        if (success) goWizard(5, 'forward');
-                      }}
-                    >
-                      {isSubmitting ? (
-                        <><div style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTop: '2px solid #fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite', marginRight: 6 }} /> Submitting...</>
-                      ) : (
-                        <>Submit Design <i className="bi bi-check-circle" /></>
-                      )}
-                    </button>
-                  ) : (
-                    <button className="wiz-btn-next" onClick={() => goWizard(4, 'forward')}>
-                      Review Design <i className="bi bi-arrow-right" />
-                    </button>
-                  )}
+                  <button className="wiz-btn-next" onClick={() => goWizard(4, 'forward')}>
+                    Review Design <i className="bi bi-arrow-right" />
+                  </button>
                 </div>
               </div>
             )}
@@ -5358,6 +5555,21 @@ export default function CustomerPortal({
 
             <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center' }}>
               {images[reviewPhotoIdx].name}
+            </div>
+
+            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center', gap: 12 }}>
+              <button 
+                type="button"
+                className="btn btn-primary"
+                style={{ background: '#171C62', color: '#fff', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 20px', borderRadius: 8 }}
+                onClick={() => {
+                  const target = images[reviewPhotoIdx];
+                  setReviewPhotoIdx(null);
+                  openCrop(target);
+                }}
+              >
+                <i className="bi bi-crop" /> Crop & Adjust Photo
+              </button>
             </div>
 
 
