@@ -176,6 +176,98 @@ router.get('/recent-submissions', adminMiddleware, async (req, res) => {
   }
 });
 
+/**
+ * POST /api/orders/cleanup-test-data
+ * Admin-only: Cleans up testing customizations, orphaned upload records,
+ * and test print files after S3 bucket wipe, resetting orders to clean initial state.
+ */
+router.post('/cleanup-test-data', adminMiddleware, async (req, res) => {
+  try {
+    const mongoose = require('mongoose');
+    const Order = require('../models/Order');
+    const db = mongoose.connection.db;
+
+    const orderFilter = {
+      $or: [
+        { 'images.0': { $exists: true } },
+        { pdfUrl: { $ne: null } },
+        { 'printFiles.0': { $exists: true } },
+        { uploadStatus: { $in: ['ready', 'completed', 'in_progress', 'revision_requested'] } },
+        { customizationStatus: { $in: ['completed', 'in-progress'] } },
+        { workflowStatus: { $in: ['photo_uploaded', 'approved', 'sent_to_printer', 'printer_processing', 'printing', 'ready_for_dispatch', 'in_transit', 'delivered', 'completed'] } },
+        { printStatus: { $in: ['queued', 'processing', 'completed'] } },
+        { designLockedAt: { $ne: null } }
+      ]
+    };
+
+    const countBefore = await Order.countDocuments(orderFilter);
+
+    const updateResult = await Order.updateMany(orderFilter, {
+      $set: {
+        images: [],
+        customerApprovedImages: [],
+        designData: null,
+        designRevisions: [],
+        pdfUrl: null,
+        printFiles: [],
+        printGenerationStatus: null,
+        printGenerationErrors: [],
+        uploadStatus: 'pending',
+        customizationStatus: 'pending',
+        workflowStatus: 'order_received',
+        adminApprovalStatus: 'pending',
+        printStatus: 'pending',
+        printerAssignedAt: null,
+        designLockedAt: null,
+        designerAssignedAt: null,
+        priority: 'normal'
+      }
+    });
+
+    // Delete mock test orders if any (e.g. ORD-1042-TEST, DEV-...)
+    const mockDelete = await Order.deleteMany({
+      $or: [
+        { id: /^DEV-/ },
+        { id: /^mock-/ },
+        { id: 'ORD-1042-TEST' }
+      ]
+    });
+
+    let qDeleted = 0, uDeleted = 0, nDeleted = 0;
+    try {
+      const qRes = await db.collection('queueitems').deleteMany({});
+      qDeleted = qRes.deletedCount;
+    } catch (_) {}
+
+    try {
+      const uRes = await db.collection('uploads').deleteMany({});
+      uDeleted = uRes.deletedCount;
+    } catch (_) {}
+
+    try {
+      const nRes = await db.collection('notifications').deleteMany({});
+      nDeleted = nRes.deletedCount;
+    } catch (_) {}
+
+    const countAfter = await Order.countDocuments(orderFilter);
+
+    res.json({
+      success: true,
+      message: 'Test data cleaned successfully after S3 wipe',
+      matchedBefore: countBefore,
+      ordersReset: updateResult.modifiedCount,
+      mockOrdersDeleted: mockDelete.deletedCount,
+      queueItemsDeleted: qDeleted,
+      uploadsDeleted: uDeleted,
+      notificationsDeleted: nDeleted,
+      ordersWithCustomizationAfter: countAfter
+    });
+  } catch (err) {
+    console.error('[POST /api/orders/cleanup-test-data] Error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 
 // Alias for customer/orders (Filtered by customer token identity)
 router.get('/customer/orders', authMiddleware(), async (req, res) => {
