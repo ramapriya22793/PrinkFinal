@@ -170,6 +170,24 @@ export const deduplicateOrders = (orders: Order[]): Order[] => {
   return cleanOrders;
 };
 
+export const isOrderSubmittedAndLocked = (o: any): boolean => {
+  if (!o) return false;
+  return Boolean(
+    o.customizationStatus === 'completed' ||
+    o.uploadStatus === 'ready' ||
+    o.workflowStatus === 'photo_uploaded' ||
+    o.workflowStatus === 'approved' ||
+    o.workflowStatus === 'sent_to_printer' ||
+    o.workflowStatus === 'printer_processing' ||
+    o.workflowStatus === 'printing' ||
+    o.workflowStatus === 'ready_for_dispatch' ||
+    o.workflowStatus === 'in_transit' ||
+    o.workflowStatus === 'delivered' ||
+    o.workflowStatus === 'completed' ||
+    o.designLockedAt
+  );
+};
+
 export const getRequiredPhotoCount = (o: any): number => {
   if (!o || !isCustomizable(o)) return 0;
   const t = (o.productType || '').toLowerCase();
@@ -345,6 +363,7 @@ export default function CustomerPortal({
 
   
   const renderMagazinePreview = (isReview = false) => {
+    const canCrop = !isReview && !isOrderSubmittedAndLocked(activeOrder);
     return (
       <div style={{ display: 'flex', justifyContent: 'center', width: '100%', padding: '20px 0' }}>
         {/* Dark tall mockup container */}
@@ -385,15 +404,25 @@ export default function CustomerPortal({
                   aspectRatio: '4/3', // Ensure landscape aspect ratio
                   cursor: images[idx] ? 'pointer' : 'default'
                 }}
-                onClick={() => { if (images[idx]) openCrop(images[idx]); }}
-                title={images[idx] ? `Click to crop Photo ${idx + 1}` : undefined}
+                onClick={() => {
+                  if (images[idx]) {
+                    if (canCrop) {
+                      openCrop(images[idx]);
+                    } else {
+                      setReviewPhotoIdx(idx);
+                    }
+                  }
+                }}
+                title={images[idx] ? (canCrop ? `Click to crop Photo ${idx + 1}` : `Click to view Photo ${idx + 1}`) : undefined}
                 >
                   {images[idx] ? (
                     <>
                       <img src={images[idx].src || images[idx].previewUrl || images[idx].url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      <div style={{ position: 'absolute', bottom: 2, right: 2, background: 'rgba(23,28,98,0.75)', color: '#fff', borderRadius: 4, padding: '1px 4px', fontSize: 8, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 2 }}>
-                        <i className="bi bi-crop" /> {images[idx].isCropped ? '✓' : 'Crop'}
-                      </div>
+                      {canCrop && (
+                        <div style={{ position: 'absolute', bottom: 2, right: 2, background: 'rgba(23,28,98,0.75)', color: '#fff', borderRadius: 4, padding: '1px 4px', fontSize: 8, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 2 }}>
+                          <i className="bi bi-crop" /> {images[idx].isCropped ? '✓' : 'Crop'}
+                        </div>
+                      )}
                     </>
                   ) : (
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#94a3b8', fontSize: '10px' }}>{idx + 1}</div>
@@ -408,6 +437,7 @@ export default function CustomerPortal({
   };
 
   const renderButterfly3D = (isReview = false) => {
+    const canCrop = !isReview && !isOrderSubmittedAndLocked(activeOrder);
     const getCropTransform = (idx: number) => {
       const img = images[idx];
       if (img && img.isCropped) return 'none';
@@ -525,18 +555,24 @@ export default function CustomerPortal({
                       onClick={(e) => {
                         if (images[flap.idxSmall]) {
                           e.stopPropagation();
-                          openCrop(images[flap.idxSmall]);
+                          if (canCrop) {
+                            openCrop(images[flap.idxSmall]);
+                          } else {
+                            setReviewPhotoIdx(flap.idxSmall);
+                          }
                         }
                       }}
-                      title={images[flap.idxSmall] ? "Click to crop photo" : undefined}
+                      title={images[flap.idxSmall] ? (canCrop ? "Click to crop photo" : "Click to view photo") : undefined}
                     >
                       <div style={{ width: '100%', height: '100%', background: '#ffffff', borderRadius: '2px', overflow: 'hidden', position: 'relative' }}>
                         {images[flap.idxSmall] ? (
                           <>
                             <img src={images[flap.idxSmall].src} style={{ width: '100%', height: '100%', objectFit: 'cover', transform: getCropTransform(flap.idxSmall) }} />
-                            <div style={{ position: 'absolute', bottom: 2, right: 2, background: 'rgba(23,28,98,0.75)', color: '#fff', borderRadius: 4, padding: '1px 4px', fontSize: 8, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 2 }}>
-                              <i className="bi bi-crop" /> {images[flap.idxSmall].isCropped ? '✓' : 'Crop'}
-                            </div>
+                            {canCrop && (
+                              <div style={{ position: 'absolute', bottom: 2, right: 2, background: 'rgba(23,28,98,0.75)', color: '#fff', borderRadius: 4, padding: '1px 4px', fontSize: 8, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 2 }}>
+                                <i className="bi bi-crop" /> {images[flap.idxSmall].isCropped ? '✓' : 'Crop'}
+                              </div>
+                            )}
                           </>
                         ) : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f472b6', fontSize: '10px' }}>PHOTO</div>}
                       </div>
@@ -555,18 +591,24 @@ export default function CustomerPortal({
                       onClick={(e) => {
                         if (images[flap.idxLarge]) {
                           e.stopPropagation();
-                          openCrop(images[flap.idxLarge]);
+                          if (canCrop) {
+                            openCrop(images[flap.idxLarge]);
+                          } else {
+                            setReviewPhotoIdx(flap.idxLarge);
+                          }
                         }
                       }}
-                      title={images[flap.idxLarge] ? "Click to crop photo" : undefined}
+                      title={images[flap.idxLarge] ? (canCrop ? "Click to crop photo" : "Click to view photo") : undefined}
                     >
                       <div style={{ width: '100%', height: '100%', transform: `rotateZ(${flap.outRot}deg)` }}>
                         {images[flap.idxLarge] ? (
                           <div style={{ width: '100%', height: '100%', borderRadius: '2px', overflow: 'hidden', position: 'relative' }}>
                             <img src={images[flap.idxLarge].src} style={{ width: '100%', height: '100%', objectFit: 'cover', transform: getCropTransform(flap.idxLarge) }} />
-                            <div style={{ position: 'absolute', bottom: 2, right: 2, background: 'rgba(23,28,98,0.75)', color: '#fff', borderRadius: 4, padding: '1px 4px', fontSize: 8, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 2 }}>
-                              <i className="bi bi-crop" /> {images[flap.idxLarge].isCropped ? '✓' : 'Crop'}
-                            </div>
+                            {canCrop && (
+                              <div style={{ position: 'absolute', bottom: 2, right: 2, background: 'rgba(23,28,98,0.75)', color: '#fff', borderRadius: 4, padding: '1px 4px', fontSize: 8, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 2 }}>
+                                <i className="bi bi-crop" /> {images[flap.idxLarge].isCropped ? '✓' : 'Crop'}
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <div style={{ width: '100%', height: '100%', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '2px' }}>
@@ -1802,6 +1844,10 @@ export default function CustomerPortal({
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => { if (e.target.files) addImages(e.target.files); };
   const handleDrop = (e: React.DragEvent) => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files) addImages(e.dataTransfer.files); };
   const openCrop = (img: UploadedImage) => {
+    if (isOrderSubmittedAndLocked(activeOrder)) {
+      showToast('Customization has already been submitted to admin. Photos are view-only.', 'info');
+      return;
+    }
     const orig = img.originalSrc || img.src || img.previewUrl || img.url || '';
     const targetWithOrig: UploadedImage = {
       ...img,
@@ -3455,6 +3501,16 @@ export default function CustomerPortal({
                                     <img
                                       src={imgSrc}
                                       alt={img.name || ''}
+                                      onError={(e) => {
+                                        const el = e.currentTarget;
+                                        if (img.url && el.src !== img.url && !el.dataset.triedUrl) {
+                                          el.dataset.triedUrl = '1';
+                                          el.src = img.url;
+                                        } else if (img.src && el.src !== img.src && !el.dataset.triedSrc) {
+                                          el.dataset.triedSrc = '1';
+                                          el.src = img.src;
+                                        }
+                                      }}
                                       style={{
                                         width: '100%',
                                         height: '100%',
@@ -3476,7 +3532,7 @@ export default function CustomerPortal({
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', borderTop: '1px solid var(--border-color)', paddingTop: 14, marginTop: 14 }}>
                           {isCustomizable(order) && (
                             <>
-                              {(order.customizationStatus === 'completed' || order.uploadStatus === 'ready' || order.workflowStatus === 'photo_uploaded' || order.designLockedAt) ? (
+                              {isOrderSubmittedAndLocked(order) ? (
                                 <span className="badge badge-success" style={{ padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center' }}>
                                   <i className="bi bi-lock-fill" style={{ marginRight: 6 }} /> Customization Submitted & Locked
                                 </span>
@@ -4305,16 +4361,34 @@ export default function CustomerPortal({
                                 {/* Thumbnail */}
                                 <div
                                   className="wiz-flap-card-thumb"
-                                  onClick={() => { if (img) openCrop(img); }}
-                                  title={img ? `Click to crop ${slot.label}` : 'No photo uploaded'}
+                                  onClick={() => {
+                                    if (img) {
+                                      if (isOrderSubmittedAndLocked(activeOrder)) {
+                                        setReviewPhotoIdx(slot.idx);
+                                      } else {
+                                        openCrop(img);
+                                      }
+                                    }
+                                  }}
+                                  title={img ? (isOrderSubmittedAndLocked(activeOrder) ? `Click to view ${slot.label}` : `Click to crop ${slot.label}`) : 'No photo uploaded'}
                                 >
                                   {img ? (
                                     <>
                                       <img
                                         src={img.src || img.previewUrl || img.url}
                                         alt={slot.label}
+                                        onError={(e) => {
+                                          const el = e.currentTarget;
+                                          if (img.url && el.src !== img.url && !el.dataset.triedUrl) {
+                                            el.dataset.triedUrl = '1';
+                                            el.src = img.url;
+                                          } else if (img.src && el.src !== img.src && !el.dataset.triedSrc) {
+                                            el.dataset.triedSrc = '1';
+                                            el.src = img.src;
+                                          }
+                                        }}
                                       />
-                                      {img.isCropped && (
+                                      {!isOrderSubmittedAndLocked(activeOrder) && img.isCropped && (
                                         <div className="wiz-flap-card-check" title="Cropped">
                                           ✓
                                         </div>
@@ -4329,13 +4403,24 @@ export default function CustomerPortal({
 
                                 {/* Action button */}
                                 {img ? (
-                                  <button
-                                    type="button"
-                                    className={`wiz-flap-crop-btn ${img.isCropped ? 'is-cropped' : ''}`}
-                                    onClick={() => openCrop(img)}
-                                  >
-                                    <i className="bi bi-crop" /> {img.isCropped ? 'Recrop' : 'Crop Photo'}
-                                  </button>
+                                  isOrderSubmittedAndLocked(activeOrder) ? (
+                                    <button
+                                      type="button"
+                                      className="wiz-flap-crop-btn"
+                                      style={{ background: '#f1f5f9', color: '#0369a1', borderColor: '#cbd5e1' }}
+                                      onClick={() => setReviewPhotoIdx(slot.idx)}
+                                    >
+                                      <i className="bi bi-eye" /> View Photo
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className={`wiz-flap-crop-btn ${img.isCropped ? 'is-cropped' : ''}`}
+                                      onClick={() => openCrop(img)}
+                                    >
+                                      <i className="bi bi-crop" /> {img.isCropped ? 'Recrop' : 'Crop Photo'}
+                                    </button>
+                                  )
                                 ) : (
                                   <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>No Photo</div>
                                 )}
@@ -5522,6 +5607,17 @@ export default function CustomerPortal({
               <img
                 src={images[reviewPhotoIdx].previewUrl || images[reviewPhotoIdx].src || images[reviewPhotoIdx].url}
                 alt={images[reviewPhotoIdx].name}
+                onError={(e) => {
+                  const el = e.currentTarget;
+                  const target = images[reviewPhotoIdx];
+                  if (target.url && el.src !== target.url && !el.dataset.triedUrl) {
+                    el.dataset.triedUrl = '1';
+                    el.src = target.url;
+                  } else if (target.src && el.src !== target.src && !el.dataset.triedSrc) {
+                    el.dataset.triedSrc = '1';
+                    el.src = target.src;
+                  }
+                }}
                 style={{
                   maxWidth: '100%',
                   maxHeight: '70vh',
@@ -5557,20 +5653,29 @@ export default function CustomerPortal({
               {images[reviewPhotoIdx].name}
             </div>
 
-            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center', gap: 12 }}>
-              <button 
-                type="button"
-                className="btn btn-primary"
-                style={{ background: '#171C62', color: '#fff', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 20px', borderRadius: 8 }}
-                onClick={() => {
-                  const target = images[reviewPhotoIdx];
-                  setReviewPhotoIdx(null);
-                  openCrop(target);
-                }}
-              >
-                <i className="bi bi-crop" /> Crop & Adjust Photo
-              </button>
-            </div>
+            {/* Show Crop button ONLY BEFORE submitting to admin (during wizard steps 2-4) */}
+            {!isOrderSubmittedAndLocked(activeOrder) && activeSubView === 'preview' && wizardStep >= 2 && wizardStep <= 4 ? (
+              <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center', gap: 12 }}>
+                <button 
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ background: '#171C62', color: '#fff', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 20px', borderRadius: 8 }}
+                  onClick={() => {
+                    const target = images[reviewPhotoIdx];
+                    setReviewPhotoIdx(null);
+                    openCrop(target);
+                  }}
+                >
+                  <i className="bi bi-crop" /> Crop & Adjust Photo
+                </button>
+              </div>
+            ) : (
+              <div style={{ marginTop: 14, display: 'flex', justifyContent: 'center' }}>
+                <span style={{ fontSize: 11, color: '#0369a1', background: '#e0f2fe', padding: '5px 14px', borderRadius: 99, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <i className="bi bi-eye-fill" /> Photo View Only · Customization Submitted
+                </span>
+              </div>
+            )}
 
 
           </div>
