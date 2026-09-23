@@ -172,18 +172,19 @@ export const deduplicateOrders = (orders: Order[]): Order[] => {
 
 export const isOrderSubmittedAndLocked = (o: any): boolean => {
   if (!o) return false;
+  const cStatus = String(o.customizationStatus || '').toLowerCase();
+  const uStatus = String(o.uploadStatus || '').toLowerCase();
+  const wStatus = String(o.workflowStatus || '').toLowerCase();
+  const aStatus = String(o.approvalStatus || '').toLowerCase();
   return Boolean(
-    o.customizationStatus === 'completed' ||
-    o.uploadStatus === 'ready' ||
-    o.workflowStatus === 'photo_uploaded' ||
-    o.workflowStatus === 'approved' ||
-    o.workflowStatus === 'sent_to_printer' ||
-    o.workflowStatus === 'printer_processing' ||
-    o.workflowStatus === 'printing' ||
-    o.workflowStatus === 'ready_for_dispatch' ||
-    o.workflowStatus === 'in_transit' ||
-    o.workflowStatus === 'delivered' ||
-    o.workflowStatus === 'completed' ||
+    cStatus === 'completed' ||
+    cStatus === 'submitted' ||
+    cStatus === 'locked' ||
+    uStatus === 'ready' ||
+    uStatus === 'uploaded' ||
+    uStatus === 'complete' ||
+    ['photo_uploaded', 'approved', 'sent_to_printer', 'printer_processing', 'printing', 'ready_for_dispatch', 'in_transit', 'delivered', 'completed'].includes(wStatus) ||
+    ['approved', 'locked'].includes(aStatus) ||
     o.designLockedAt
   );
 };
@@ -1845,7 +1846,6 @@ export default function CustomerPortal({
   const handleDrop = (e: React.DragEvent) => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files) addImages(e.dataTransfer.files); };
   const openCrop = (img: UploadedImage) => {
     if (isOrderSubmittedAndLocked(activeOrder)) {
-      showToast('Customization has already been submitted to admin. Photos are view-only.', 'info');
       return;
     }
     const orig = img.originalSrc || img.src || img.previewUrl || img.url || '';
@@ -3172,7 +3172,7 @@ export default function CustomerPortal({
                         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap', borderTop: '1px solid var(--border-color)', paddingTop: 14 }}>
                           {isCustomizable(order) && (
                             <>
-                              {(order.customizationStatus === 'completed' || order.uploadStatus === 'ready' || order.workflowStatus === 'photo_uploaded' || order.designLockedAt) ? (
+                              {isOrderSubmittedAndLocked(order) ? (
                                 <span className="badge badge-success" style={{ padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center' }}>
                                   <i className="bi bi-lock-fill" style={{ marginRight: 6 }} /> Customization Submitted & Locked
                                 </span>
@@ -5669,13 +5669,7 @@ export default function CustomerPortal({
                   <i className="bi bi-crop" /> Crop & Adjust Photo
                 </button>
               </div>
-            ) : (
-              <div style={{ marginTop: 14, display: 'flex', justifyContent: 'center' }}>
-                <span style={{ fontSize: 11, color: '#0369a1', background: '#e0f2fe', padding: '5px 14px', borderRadius: 99, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  <i className="bi bi-eye-fill" /> Photo View Only · Customization Submitted
-                </span>
-              </div>
-            )}
+            ) : null}
 
 
           </div>
