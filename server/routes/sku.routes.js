@@ -88,4 +88,30 @@ router.delete('/:id', adminMiddleware, async (req, res) => {
   }
 });
 
+// Bulk sync SKUs to production database
+router.post('/bulk-sync', async (req, res) => {
+  try {
+    const items = req.body.skus || [];
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ success: false, message: 'No skus provided' });
+    }
+    const SKU = require('../models/SKU');
+    const ops = items.map(item => {
+      const doc = { ...item };
+      delete doc._id;
+      return {
+        updateOne: {
+          filter: { $or: [{ sku: item.sku }, { id: item.id }] },
+          update: { $set: doc },
+          upsert: true
+        }
+      };
+    });
+    const result = await SKU.bulkWrite(ops);
+    res.json({ success: true, count: items.length, result });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
