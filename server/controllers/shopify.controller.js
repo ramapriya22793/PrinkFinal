@@ -269,6 +269,14 @@ const syncHandler = async (req, res) => {
       await shopifyService.syncCustomerToDb(c);
     }
 
+    // Push all unsynced orders to Google Sheets
+    try {
+      const { syncAllUnsyncedOrdersToSheet } = require('../services/googleSheetService');
+      await syncAllUnsyncedOrdersToSheet();
+    } catch (sheetErr) {
+      console.warn('[API MANUAL SYNC] Sheets bulk sync error:', sheetErr.message);
+    }
+
     console.log(`[API MANUAL SYNC] Completed. Synced ${orders.length} orders, ${productSyncResult.count} products, and ${customers.length} customers.`);
     res.json({
       success: true,

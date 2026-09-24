@@ -319,7 +319,7 @@ app.get('/api/health', async (_req, res) => {
 // Google Sheets Test Endpoint
 app.get('/api/test/sheets', async (_req, res) => {
   try {
-    const { getSheetsClient } = require('./services/googleSheetService');
+    const { getSheetsClient, resolveSpreadsheetId } = require('./services/googleSheetService');
     const client = await getSheetsClient();
     if (!client) {
       return res.status(500).json({ success: false, message: 'Missing credentials or client failed to initialize' });
@@ -327,13 +327,17 @@ app.get('/api/test/sheets', async (_req, res) => {
     if (client === 'mock') {
       return res.json({ success: true, message: 'Mock mode is active. Please replace MOCK_KEY_REPLACE_ME in google-credentials.json with the real private key.' });
     }
-    // Attempt a basic fetch to verify connection
-    const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
-    if (!SPREADSHEET_ID) {
-      return res.status(500).json({ success: false, message: 'GOOGLE_SHEET_ID is missing from .env' });
+    const spreadsheetId = await resolveSpreadsheetId();
+    if (!spreadsheetId) {
+      return res.status(500).json({ success: false, message: 'Spreadsheet ID is missing' });
     }
-    const response = await client.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
-    res.json({ success: true, message: 'Successfully connected to Google Sheets API', sheetTitle: response.data.properties.title });
+    const response = await client.spreadsheets.get({ spreadsheetId });
+    res.json({
+      success: true,
+      message: 'Successfully connected to Google Sheets API',
+      spreadsheetId,
+      sheetTitle: response.data.properties.title
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Google API Connection failed', error: err.message });
   }

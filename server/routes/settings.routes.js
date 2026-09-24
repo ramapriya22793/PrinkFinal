@@ -6,7 +6,8 @@ const { adminMiddleware } = require('../middleware/auth.middleware');
 /** Fields that must never be sent to a browser, even for an admin. */
 const SECRET_FIELDS = [
   'shopifyAccessToken', 'shopifyApiSecret', 'shopifyWebhookSecret',
-  'storefrontAccessToken', 'awsSecretAccessKey', 'whatsappAccessToken', 'jwtSecret'
+  'storefrontAccessToken', 'awsSecretAccessKey', 'whatsappAccessToken', 'jwtSecret',
+  'googleCredentialsJson'
 ];
 
 /**

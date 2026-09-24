@@ -6,6 +6,7 @@ const { updateSpreadsheet } = require('./googleSheetService');
 const { sendUploadLinkMessage } = require('./whatsapp.service');
 
 // Models
+const Order = require('../models/Order');
 const ShopifyProduct = require('../models/ShopifyProduct');
 const ShopifyOrder = require('../models/ShopifyOrder');
 const ShopifyCustomer = require('../models/ShopifyCustomer');
@@ -145,7 +146,7 @@ const syncProductToDb = async (p) => {
   );
 };
 
-const syncOrderToDb = async (o) => {
+const syncOrderToDb = async (o, skipIndividualSheetsSync = false) => {
   let customerName = 'Shopify Customer';
   if (o.customer) {
     customerName = `${o.customer.first_name || ''} ${o.customer.last_name || ''}`.trim() || customerName;
@@ -192,9 +193,6 @@ const syncOrderToDb = async (o) => {
     } : undefined,
     rawJson: o
   };
-
-  const mongoose = require('mongoose');
-  const Order = mongoose.model('Order');
 
   const dateFormatted = new Date(o.created_at).toLocaleDateString('en-US', {
     month: 'short',
@@ -323,10 +321,10 @@ const syncOrderToDb = async (o) => {
   );
 
   // Trigger automation asynchronously if the order was newly inserted or pending sync
-  if (savedOrder.spreadsheetStatus === 'pending') {
+  if (!skipIndividualSheetsSync && savedOrder.spreadsheetStatus === 'pending') {
     updateSpreadsheet(savedOrder).then(success => {
       if (success) ShopifyOrder.updateOne({ _id: savedOrder._id }, { spreadsheetStatus: 'synced' }).exec();
-    });
+    }).catch(() => {});
   }
   
   if (savedOrder.whatsappStatus === 'pending' && savedOrder.uploadLink) {
@@ -411,7 +409,7 @@ const runFullOrderSync = async (shop, token) => {
         const batch = response.data.orders || [];
         count += batch.length;
         for (const o of batch) {
-          await syncOrderToDb(o);
+          await syncOrderToDb(o, true);
         }
 
         const linkHeader = response.headers['link'] || response.headers['Link'];
@@ -440,6 +438,12 @@ const runFullOrderSync = async (shop, token) => {
     }
   }
   console.log(`[SYNC RUNNER] Sync finished. Mapped ${count} orders to database.`);
+  try {
+    const { syncAllUnsyncedOrdersToSheet } = require('./googleSheetService');
+    await syncAllUnsyncedOrdersToSheet();
+  } catch (sheetErr) {
+    console.warn('[SYNC RUNNER] Sheets bulk sync error:', sheetErr.message);
+  }
   return { count };
 };
 
@@ -484,12 +488,18 @@ const runRecentOrderSync = async (shop, token) => {
     const batch = response.data.orders || [];
     count = batch.length;
     for (const o of batch) {
-      await syncOrderToDb(o);
+      await syncOrderToDb(o, true);
     }
   } catch (err) {
     console.error('[SYNC RUNNER ERROR] Recent order sync failed:', err.message);
   }
   console.log(`[SYNC RUNNER] Synced ${count} recent orders.`);
+  try {
+    const { syncAllUnsyncedOrdersToSheet } = require('./googleSheetService');
+    await syncAllUnsyncedOrdersToSheet();
+  } catch (sheetErr) {
+    console.warn('[SYNC RUNNER] Sheets bulk sync error:', sheetErr.message);
+  }
   return { count };
 };
 
