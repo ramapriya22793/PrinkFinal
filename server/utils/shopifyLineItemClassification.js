@@ -37,19 +37,26 @@ const PHOTO_COUNT_BY_TYPE = {
   butterfly: 8, magazine: 4, photobook: 24,
   calendar: 12, frame: 4, mug: 1, tshirt: 1,
   mobilecase: 1, pillow: 1, keychain: 2, canvas: 1,
-  polaroid: 20
+  polaroid: 20, selection: 0
 };
 
 /**
  * Line items matching these need no customer photo upload at all.
  * "gift wrap" is a distinct phrase from "gift card" - a common Shopify
  * add-on line item that was previously falling through to customizable.
+ * "selection" / "selections" are option choices (e.g. Butterfly Box - Selections)
+ * that never require photo upload.
  */
-const NON_CUSTOMIZABLE_KEYWORDS = ['gift card', 'gift-card', 'gift wrap', 'gift-wrap', 'giftwrap', 'voucher', 'shipping', 'donation', 'wrap', 'pg-gi-wp', 'greeting card'];
+const NON_CUSTOMIZABLE_KEYWORDS = [
+  'gift card', 'gift-card', 'gift wrap', 'gift-wrap', 'giftwrap',
+  'voucher', 'shipping', 'donation', 'wrap', 'pg-gi-wp', 'greeting card',
+  'selection', 'selections'
+];
 
 /** Detect the internal product type from a line item's title. Defaults to 'canvas'. */
 function detectProductType(title) {
   const t = (title || '').toLowerCase();
+  if (t.includes('selection')) return 'selection';
   for (const [keyword, type] of PRODUCT_TYPE_KEYWORDS) {
     if (t.includes(keyword)) return type;
   }
@@ -60,6 +67,7 @@ function detectProductType(title) {
 function isNonCustomizable(title, sku) {
   const t = (title || '').toLowerCase();
   const s = (sku || '').toLowerCase();
+  if (t.includes('selection') || s.includes('selection')) return true;
   return NON_CUSTOMIZABLE_KEYWORDS.some(k => t.includes(k) || s.includes(k));
 }
 

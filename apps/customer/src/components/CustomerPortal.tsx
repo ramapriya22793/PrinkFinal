@@ -94,11 +94,12 @@ export const isCustomizable = (o: any) => {
   const t = (o.productType || '').toLowerCase();
   const p = (o.product || '').toLowerCase();
   const s = (o.sku || '').toLowerCase();
-  // "gift wrap" is a distinct phrase from "gift card" - a common Shopify
-  // add-on line item that was previously falling through to customizable.
+  // "gift wrap", "gift card", and selection-type SKUs/line-items (e.g. "Butterfly Box - Selections")
+  // are add-ons/options that do not require customer photo upload.
   const nonCustomizableKeywords = [
     'gift card', 'gift-card', 'gift wrap', 'gift-wrap', 'giftwrap',
-    'voucher', 'shipping', 'donation', 'wrap', 'pg-gi-wp', 'greeting card'
+    'voucher', 'shipping', 'donation', 'wrap', 'pg-gi-wp', 'greeting card',
+    'selection', 'selections'
   ];
   if (nonCustomizableKeywords.some(k => t.includes(k) || p.includes(k) || s.includes(k))) return false;
   if (o.requiresCustomization === true || (typeof o.requiredPhotoCount === 'number' && o.requiredPhotoCount > 0)) return true;
@@ -194,6 +195,7 @@ export const getRequiredPhotoCount = (o: any): number => {
   const t = (o.productType || '').toLowerCase();
   const p = (o.product || '').toLowerCase();
   const s = (o.sku || '').toLowerCase();
+  if (p.includes('selection') || s.includes('selection') || t.includes('selection')) return 0;
   if (t.includes('polaroid') || p.includes('polaroid') || s.includes('pg-pp') || s.includes('polaroid')) {
     return (typeof o.requiredPhotoCount === 'number' && o.requiredPhotoCount > 1) ? o.requiredPhotoCount : 20;
   }
@@ -264,7 +266,7 @@ export default function CustomerPortal({
     (order.product || '').toLowerCase().includes('butterfly') ||
     (order.sku || '').toLowerCase().includes('bb') ||
     (order.sku || '').toLowerCase().includes('butterfly')
-  );
+  ) && !(order.product || '').toLowerCase().includes('selection') && !(order.sku || '').toLowerCase().includes('selection');
   const isMagazine = (order: any) => order && (order.productType === 'magazine' || (order.product || '').toLowerCase().includes('magazine'));
 
   // Interactive mockup image positioning & edit states
@@ -3682,7 +3684,6 @@ export default function CustomerPortal({
                   { n: 1, label: 'Select' },
                   { n: 2, label: 'Upload' },
                   { n: 3, label: 'Preview' },
-                  { n: 4, label: 'Review' },
                   { n: 5, label: 'Done' },
                 ].filter(s => s.n !== 3 || (activeOrder && getProductConfig(activeOrder.productType).requiresPreview))
                 .map((s, idx, arr) => {
@@ -4210,7 +4211,7 @@ export default function CustomerPortal({
                         }
                     }}
                   >
-                    {getProductConfig(activeOrder.productType).requiresPreview ? 'Preview & Edit' : 'Review Design'} <i className="bi bi-arrow-right" />
+                    {getProductConfig(activeOrder.productType).requiresPreview ? 'Preview & Edit' : 'Submit Design'} <i className="bi bi-arrow-right" />
                   </button>
                 </div>
               </>
@@ -4587,8 +4588,26 @@ export default function CustomerPortal({
                   <button className="wiz-btn-back" onClick={() => goWizard(2, 'back')}>
                     <i className="bi bi-arrow-left" /> Back
                   </button>
-                  <button className="wiz-btn-next" onClick={() => goWizard(4, 'forward')}>
-                    Review Design <i className="bi bi-arrow-right" />
+                  <button
+                    className="wiz-btn-submit"
+                    disabled={isSubmitting}
+                    style={{ background: 'linear-gradient(135deg, #171C62 0%, #2A3178 100%)', color: '#fff', fontWeight: 700, padding: '12px 28px', borderRadius: 12, border: 'none', display: 'inline-flex', alignItems: 'center', gap: 8, cursor: isSubmitting ? 'not-allowed' : 'pointer', boxShadow: '0 4px 14px rgba(23, 28, 98, 0.25)' }}
+                    onClick={async () => {
+                      setIsSubmitting(true);
+                      const success = await handleSubmitDesign();
+                      setIsSubmitting(false);
+                      if (success) goWizard(5, 'forward');
+                    }}
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true" style={{ width: 14, height: 14, borderRightColor: 'transparent', display: 'inline-block' }} /> Submitting...
+                      </>
+                    ) : (
+                      <>
+                        Submit Design <i className="bi bi-check-circle-fill" />
+                      </>
+                    )}
                   </button>
                 </div>
               </div>

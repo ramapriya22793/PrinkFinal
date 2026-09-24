@@ -396,7 +396,8 @@ router.get('/customer/orders', authMiddleware(), async (req, res) => {
     const { cleanOrders, duplicateIdsToDelete, mergesToPerform } = deduplicateOrders(customerOrders);
     customerOrders = cleanOrders.map(order => {
       if (order.images && Array.isArray(order.images)) {
-        const reqLimit = order.requiredPhotoCount || ((order.productType === 'butterfly' || (order.product || '').toLowerCase().includes('butterfly')) ? 8 : ((order.productType === 'magazine' || (order.product || '').toLowerCase().includes('magazine')) ? 4 : 0));
+        const isSelection = (order.product || '').toLowerCase().includes('selection') || (order.sku || '').toLowerCase().includes('selection');
+        const reqLimit = isSelection ? 0 : (order.requiredPhotoCount || ((order.productType === 'butterfly' || (order.product || '').toLowerCase().includes('butterfly')) ? 8 : ((order.productType === 'magazine' || (order.product || '').toLowerCase().includes('magazine')) ? 4 : 0)));
         const cleaned = deduplicateOrderImages(order.images, reqLimit);
         if (cleaned.length !== order.images.length) {
           Order.updateOne({ id: order.id }, { $set: { images: cleaned } }).catch(() => {});
@@ -910,8 +911,9 @@ router.post('/:id/review', adminMiddleware, async (req, res) => {
 
     const isApproved = action === 'approve';
 
-    const isButterfly = (existingOrder.productType || '').toLowerCase() === 'butterfly' || (existingOrder.product || '').toLowerCase().includes('butterfly');
-    const isMagazine = (existingOrder.productType || '').toLowerCase() === 'magazine' || (existingOrder.product || '').toLowerCase().includes('magazine');
+    const isSelection = (existingOrder.product || '').toLowerCase().includes('selection') || (existingOrder.sku || '').toLowerCase().includes('selection');
+    const isButterfly = !isSelection && ((existingOrder.productType || '').toLowerCase() === 'butterfly' || (existingOrder.product || '').toLowerCase().includes('butterfly'));
+    const isMagazine = !isSelection && ((existingOrder.productType || '').toLowerCase() === 'magazine' || (existingOrder.product || '').toLowerCase().includes('magazine'));
     const isPolaroid = (existingOrder.productType || '').toLowerCase() === 'polaroid' || (existingOrder.product || '').toLowerCase().includes('polaroid') || (existingOrder.sku || '').toUpperCase().includes('PG-PP') || (existingOrder.sku || '').toUpperCase().includes('POLAROID');
     
     let templateId = '';
@@ -1193,8 +1195,9 @@ router.post('/:id/regenerate', adminMiddleware, async (req, res) => {
 
     const printFiles = [];
     const failures = [];
-    const isButterfly = (order.productType || '').toLowerCase() === 'butterfly' || (order.product || '').toLowerCase().includes('butterfly');
-    const isMagazine = (order.productType || '').toLowerCase() === 'magazine' || (order.product || '').toLowerCase().includes('magazine');
+    const isSelection = (order.product || '').toLowerCase().includes('selection') || (order.sku || '').toLowerCase().includes('selection');
+    const isButterfly = !isSelection && ((order.productType || '').toLowerCase() === 'butterfly' || (order.product || '').toLowerCase().includes('butterfly'));
+    const isMagazine = !isSelection && ((order.productType || '').toLowerCase() === 'magazine' || (order.product || '').toLowerCase().includes('magazine'));
     const isPolaroid = (order.productType || '').toLowerCase() === 'polaroid' || (order.product || '').toLowerCase().includes('polaroid') || (order.sku || '').toUpperCase().includes('PG-PP') || (order.sku || '').toUpperCase().includes('POLAROID');
     if (isButterfly) {
       try {
@@ -1323,8 +1326,9 @@ router.post('/:id/submit-design', adminMiddleware, async (req, res) => {
     // No canvas preview is sent from the frontend, so there is no request-body
     // size limit to worry about and quality is always full original resolution.
 
-    const isButterfly = (refreshed.productType || '').toLowerCase() === 'butterfly' || (refreshed.product || '').toLowerCase().includes('butterfly');
-    const isMagazine = (refreshed.productType || '').toLowerCase() === 'magazine' || (refreshed.product || '').toLowerCase().includes('magazine');
+    const isSelection = (refreshed.product || '').toLowerCase().includes('selection') || (refreshed.sku || '').toLowerCase().includes('selection');
+    const isButterfly = !isSelection && ((refreshed.productType || '').toLowerCase() === 'butterfly' || (refreshed.product || '').toLowerCase().includes('butterfly'));
+    const isMagazine = !isSelection && ((refreshed.productType || '').toLowerCase() === 'magazine' || (refreshed.product || '').toLowerCase().includes('magazine'));
     const isPolaroid = (refreshed.productType || '').toLowerCase() === 'polaroid' || (refreshed.product || '').toLowerCase().includes('polaroid') || (refreshed.sku || '').toUpperCase().includes('PG-PP') || (refreshed.sku || '').toUpperCase().includes('POLAROID');
     if (isButterfly) {
       try {
@@ -1443,8 +1447,9 @@ router.post('/:id/force-approve', adminMiddleware, async (req, res) => {
       const template = resolveTemplate({
         sku: order.sku, productType: order.productType, productTitle: order.product
       });
-      const isButterfly = (order.productType || '').toLowerCase() === 'butterfly' || (order.product || '').toLowerCase().includes('butterfly');
-      const isMagazine = (order.productType || '').toLowerCase() === 'magazine' || (order.product || '').toLowerCase().includes('magazine');
+      const isSelection = (order.product || '').toLowerCase().includes('selection') || (order.sku || '').toLowerCase().includes('selection');
+      const isButterfly = !isSelection && ((order.productType || '').toLowerCase() === 'butterfly' || (order.product || '').toLowerCase().includes('butterfly'));
+      const isMagazine = !isSelection && ((order.productType || '').toLowerCase() === 'magazine' || (order.product || '').toLowerCase().includes('magazine'));
       const isPolaroid = (order.productType || '').toLowerCase() === 'polaroid' || (order.product || '').toLowerCase().includes('polaroid');
       let extraUpdateData = {};
       if (isButterfly) {
