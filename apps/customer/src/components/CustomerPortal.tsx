@@ -984,12 +984,25 @@ export default function CustomerPortal({
       if (resOrders.ok) {
         let list = await resOrders.json();
         
-        // Filter by specific order if token has a shopifyOrderId injected
+        // Filter by specific order if token has a shopifyOrderId / orderNumber injected
         try {
           const payload = JSON.parse(atob(token.split('.')[1]));
-          if (payload.shopifyOrderId) {
-            const targetId = String(payload.shopifyOrderId);
-            const filtered = list.filter((o: any) => String(o.shopifyId) === targetId);
+          if (payload.shopifyOrderId || payload.orderNumber || payload.orderName) {
+            const targetId = String(payload.shopifyOrderId || '').trim();
+            const targetNum = String(payload.orderNumber || '').replace(/^#/, '').trim();
+            const targetName = String(payload.orderName || '').replace(/^#/, '').trim();
+
+            const filtered = list.filter((o: any) => {
+              const oShopifyId = String(o.shopifyId || '').trim();
+              const oOrderNum = String(o.orderNumber || '').replace(/^#/, '').trim();
+              const oName = String(o.name || '').replace(/^#/, '').trim();
+              const oId = String(o.id || '').trim();
+
+              if (targetId && (oShopifyId === targetId || oId === targetId || oId.startsWith(targetId + '-'))) return true;
+              if (targetNum && (oOrderNum === targetNum || oName === targetNum || oId.startsWith(targetNum + '-') || oId.includes(targetNum))) return true;
+              if (targetName && (oName === targetName || oOrderNum === targetName || oId.startsWith(targetName + '-'))) return true;
+              return false;
+            });
             if (filtered.length > 0) {
               list = filtered;
             }
@@ -2278,9 +2291,22 @@ export default function CustomerPortal({
         let list = await res.json();
         try {
           const payload = JSON.parse(atob(token.split('.')[1]));
-          if (payload.shopifyOrderId) {
-            const targetId = String(payload.shopifyOrderId);
-            const filtered = list.filter((o: any) => String(o.shopifyId) === targetId);
+          if (payload.shopifyOrderId || payload.orderNumber || payload.orderName) {
+            const targetId = String(payload.shopifyOrderId || '').trim();
+            const targetNum = String(payload.orderNumber || '').replace(/^#/, '').trim();
+            const targetName = String(payload.orderName || '').replace(/^#/, '').trim();
+
+            const filtered = list.filter((o: any) => {
+              const oShopifyId = String(o.shopifyId || '').trim();
+              const oOrderNum = String(o.orderNumber || '').replace(/^#/, '').trim();
+              const oName = String(o.name || '').replace(/^#/, '').trim();
+              const oId = String(o.id || '').trim();
+
+              if (targetId && (oShopifyId === targetId || oId === targetId || oId.startsWith(targetId + '-'))) return true;
+              if (targetNum && (oOrderNum === targetNum || oName === targetNum || oId.startsWith(targetNum + '-') || oId.includes(targetNum))) return true;
+              if (targetName && (oName === targetName || oOrderNum === targetName || oId.startsWith(targetName + '-'))) return true;
+              return false;
+            });
             if (filtered.length > 0) list = filtered;
           }
         } catch (_) {}

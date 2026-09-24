@@ -307,22 +307,47 @@ router.get('/customer/orders', authMiddleware(), async (req, res) => {
     const userPhone = req.user.phone;
     const Order = require('../models/Order');
 
-    // ── Fast exact-match DB query — no slow regex, returns instantly ──
-    const buildDbQuery = (email, phone, name, shopifyOrderId) => {
-      const conditions = [];
-      if (shopifyOrderId) {
-        const cleanId = String(shopifyOrderId).replace(/^#/, '').trim();
-        conditions.push({ shopifyId: String(shopifyOrderId) });
-        conditions.push({ id: String(shopifyOrderId) });
-        conditions.push({ orderNumber: String(shopifyOrderId) });
-        conditions.push({ orderNumber: `#${cleanId}` });
-        conditions.push({ orderNumber: cleanId });
+    // ── Safe DB query — strictly by order identifier or customer email/phone, NEVER by name ──
+    const targetOrder = req.user.shopifyOrderId || req.user.orderNumber;
+
+    const buildDbQuery = (email, phone, targetOrder) => {
+      // If customer session is scoped to a specific order, query ONLY that order's line items
+      if (targetOrder) {
+        const cleanId = String(targetOrder).replace(/^#/, '').trim();
+        const numericId = Number(cleanId);
+        const orderConditions = [
+          { shopifyId: String(targetOrder) },
+          { shopifyId: cleanId },
+          { id: String(targetOrder) },
+          { id: cleanId },
+          { id: { $regex: new RegExp('^' + cleanId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(-|$)', 'i') } },
+          { orderNumber: String(targetOrder) },
+          { orderNumber: cleanId },
+          { orderNumber: `#${cleanId}` },
+          { name: cleanId },
+          { name: `#${cleanId}` }
+        ];
+        if (!isNaN(numericId)) {
+          orderConditions.push({ orderNumber: numericId });
+          if (cleanId.length === 6 && cleanId.startsWith('1')) {
+            const shortNum = Number(cleanId.slice(1));
+            if (!isNaN(shortNum)) {
+              orderConditions.push({ orderNumber: shortNum });
+              orderConditions.push({ orderNumber: String(shortNum) });
+            }
+          }
+        }
+        return { $or: orderConditions };
       }
+
+      // Otherwise, query by exact customer email or verified phone
+      const conditions = [];
       if (email) {
         const emailLower = email.toLowerCase().trim();
-        conditions.push({ 'customer.email': { $regex: new RegExp('^' + emailLower + '$', 'i') } });
-        conditions.push({ 'email': { $regex: new RegExp('^' + emailLower + '$', 'i') } });
-        conditions.push({ 'customerEmail': { $regex: new RegExp('^' + emailLower + '$', 'i') } });
+        const escapedEmail = emailLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        conditions.push({ 'customer.email': { $regex: new RegExp('^' + escapedEmail + '$', 'i') } });
+        conditions.push({ 'email': { $regex: new RegExp('^' + escapedEmail + '$', 'i') } });
+        conditions.push({ 'customerEmail': { $regex: new RegExp('^' + escapedEmail + '$', 'i') } });
         const dummyMatch = email.match(/^(\d+)@customer\.com$/);
         if (dummyMatch) {
           conditions.push({ 'customer.id': dummyMatch[1] });
@@ -332,37 +357,37 @@ router.get('/customer/orders', authMiddleware(), async (req, res) => {
       if (phone) {
         const cleanP = phone.replace(/\D/g, '');
         if (cleanP.length > 5) {
-          conditions.push({ 'customer.phone': { $regex: cleanP.slice(-10) } });
-          conditions.push({ 'phone': { $regex: cleanP.slice(-10) } });
-          conditions.push({ 'shippingAddress.phone': { $regex: cleanP.slice(-10) } });
+          const phoneRegex = new RegExp(cleanP.slice(-10) + '$');
+          conditions.push({ 'customer.phone': { $regex: phoneRegex } });
+          conditions.push({ 'phone': { $regex: phoneRegex } });
+          conditions.push({ 'shippingAddress.phone': { $regex: phoneRegex } });
         }
-      }
-      if (name && name !== 'Guest') {
-        conditions.push({ 'customer.name': { $regex: new RegExp('^' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') } });
       }
       return conditions.length > 0 ? { $or: conditions } : null;
     };
 
-    const dbQuery = buildDbQuery(userEmail, userPhone, req.user.name, req.user.shopifyOrderId);
+    const dbQuery = buildDbQuery(userEmail, userPhone, targetOrder);
     let customerOrders = dbQuery ? await Order.find(dbQuery).sort({ updatedAt: -1 }).lean() : [];
 
-    // Fallback: if no order matched by exact query, fetch recent orders or match by email substring
-    if (customerOrders.length === 0 && userEmail && !req.user.shopifyOrderId) {
-      const emailSub = userEmail.split('@')[0];
-      if (emailSub && emailSub.length >= 3) {
-        customerOrders = await Order.find({
-          $or: [
-            { 'customer.email': { $regex: emailSub, $options: 'i' } },
-            { 'email': { $regex: emailSub, $options: 'i' } },
-            { 'customerEmail': { $regex: emailSub, $options: 'i' } }
-          ]
-        }).sort({ updatedAt: -1 }).lean();
-      }
-    }
+    // Filter strictly to target order when order context exists
+    if (targetOrder && customerOrders.length > 0) {
+      const cleanTarget = String(targetOrder).replace(/^#/, '').trim();
+      const targetNumeric = cleanTarget.replace(/\D/g, '');
+      const filtered = customerOrders.filter(o => {
+        const oShopifyId = String(o.shopifyId || '').trim();
+        const oOrderNum = String(o.orderNumber || '').replace(/^#/, '').trim();
+        const oId = String(o.id || '').trim();
+        const oName = String(o.name || '').replace(/^#/, '').trim();
 
-    // For magic-link logins — filter strictly to that order
-    if (req.user.shopifyOrderId && customerOrders.length > 0) {
-      const filtered = customerOrders.filter(o => String(o.shopifyId) === String(req.user.shopifyOrderId) || String(o.id) === String(req.user.shopifyOrderId));
+        if (oShopifyId && (oShopifyId === cleanTarget || oShopifyId === targetNumeric)) return true;
+        if (oOrderNum && (oOrderNum === cleanTarget || (targetNumeric && (oOrderNum === targetNumeric || targetNumeric.endsWith(oOrderNum) || oOrderNum.endsWith(targetNumeric))))) return true;
+        if (oName && (oName === cleanTarget || oName === `#${cleanTarget}`)) return true;
+        if (oId) {
+          if (oId === cleanTarget || oId.startsWith(cleanTarget + '-') || oId.startsWith(cleanTarget + '_')) return true;
+          if (targetNumeric && (oId.startsWith(targetNumeric + '-') || oId.startsWith(targetNumeric + '_'))) return true;
+        }
+        return false;
+      });
       if (filtered.length > 0) customerOrders = filtered;
     }
 

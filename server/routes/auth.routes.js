@@ -246,7 +246,21 @@ async function findCandidateOrders(identifier, cleanId, cleanPhone) {
   const queryConditions = [];
   if (cleanId && !cleanId.includes('@')) {
     queryConditions.push({ orderNumber: cleanId });
-    queryConditions.push({ id: { $regex: escapeRegExp(cleanId), $options: 'i' } });
+    queryConditions.push({ orderNumber: `#${cleanId}` });
+    queryConditions.push({ name: cleanId });
+    queryConditions.push({ name: `#${cleanId}` });
+    queryConditions.push({ id: { $regex: new RegExp('^' + escapeRegExp(cleanId) + '(-|$)', 'i') } });
+    const numId = Number(cleanId);
+    if (!isNaN(numId)) {
+      queryConditions.push({ orderNumber: numId });
+      if (cleanId.length === 6 && cleanId.startsWith('1')) {
+        const shortNum = Number(cleanId.slice(1));
+        if (!isNaN(shortNum)) {
+          queryConditions.push({ orderNumber: shortNum });
+          queryConditions.push({ orderNumber: String(shortNum) });
+        }
+      }
+    }
   }
   if (identifier) {
     queryConditions.push({ shopifyId: identifier });
@@ -275,6 +289,8 @@ router.post('/shopify-dev-login', async (req, res) => {
     let targetShopifyOrderId = null;
     let matchedOrder = null;
     let identifier = String(query || email || customerId || '').trim();
+    const cleanId = identifier.replace(/^#/, '');
+    const cleanPhone = String(phone || identifier || '').replace(/\D/g, '');
 
     const db = require('../db');
 
@@ -457,8 +473,6 @@ router.post('/shopify-dev-login', async (req, res) => {
         return res.status(400).json({ success: false, error: 'Please enter your Email Address.' });
       }
 
-      const cleanId = identifier.replace(/^#/, '');
-      const cleanPhone = identifier.replace(/\D/g, '');
       const candidateOrders = await findCandidateOrders(identifier, cleanId, cleanPhone);
 
       matchedOrder = candidateOrders.find(o => {
@@ -618,8 +632,17 @@ router.post('/shopify-dev-login', async (req, res) => {
     const isPhone = !isEmail && cleanPhone.length >= 7;
     const isOrderContext = !isEmail && !isPhone;
 
-    if (targetShopifyOrderId && (req.body?.orderNumber || isOrderContext)) {
-      payload.shopifyOrderId = targetShopifyOrderId;
+    if (targetShopifyOrderId || matchedOrder || req.body?.orderNumber || isOrderContext) {
+      if (targetShopifyOrderId || matchedOrder?.shopifyId) {
+        payload.shopifyOrderId = targetShopifyOrderId || matchedOrder?.shopifyId;
+      }
+      const orderNum = matchedOrder?.orderNumber || req.body?.orderNumber || (isOrderContext ? cleanId : undefined);
+      if (orderNum) {
+        payload.orderNumber = String(orderNum).replace(/^#/, '').trim();
+      }
+      if (matchedOrder?.name) {
+        payload.orderName = matchedOrder.name;
+      }
     }
 
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
@@ -899,7 +922,9 @@ router.get('/upload-link/:token', async (req, res) => {
         name: user.name, 
         phone: user.phone || '', 
         role: 'customer',
-        shopifyOrderId: order.shopifyOrderId // Injecting context
+        shopifyOrderId: order.shopifyOrderId, // Injecting context
+        orderNumber: order.orderNumber ? String(order.orderNumber).replace(/^#/, '').trim() : undefined,
+        orderName: order.name
       },
       JWT_SECRET,
       { expiresIn: '7d' }
