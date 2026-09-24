@@ -244,26 +244,7 @@ const syncAllUnsyncedOrdersToSheet = async () => {
     return { count: 0, failed: 0, total: 0, error: 'Sheets client unavailable' };
   }
 
-  // 1. Fetch all existing order numbers from Google Sheets in ONE call
-  const existingOrderNumbers = new Set();
-  try {
-    const existingRes = await sheets.spreadsheets.values.get({
-      spreadsheetId,
-      range: 'Sheet1!A:A',
-    });
-    if (existingRes.data.values) {
-      existingRes.data.values.forEach(r => {
-        if (r && r[0]) {
-          existingOrderNumbers.add(String(r[0]).trim());
-        }
-      });
-    }
-    console.log(`[SHEETS BACKFILL] Found ${existingOrderNumbers.size} existing orders in Google Sheet`);
-  } catch (err) {
-    console.warn('[SHEETS BACKFILL] Could not fetch existing order numbers from sheet:', err.message);
-  }
-
-  // 2. Find all orders in DB that are not marked synced
+  // 1. Find all orders in DB that are not marked synced (limit 100 per run)
   const unsyncedOrders = await ShopifyOrder.find({
     $or: [
       { spreadsheetStatus: { $ne: 'synced' } },
@@ -271,34 +252,21 @@ const syncAllUnsyncedOrdersToSheet = async () => {
     ]
   })
   .sort({ createdAtShopify: 1 })
+  .limit(100)
   .lean();
 
-  console.log(`[SHEETS BACKFILL] Found ${unsyncedOrders.length} unsynced orders in database`);
-
-  const alreadyExistingIds = [];
-  const toAppend = [];
-
-  for (const order of unsyncedOrders) {
-    const orderNum = String(order.orderNumber || order.shopifyOrderId || order.id).trim();
-    if (existingOrderNumbers.has(orderNum)) {
-      alreadyExistingIds.push(order._id);
-    } else {
-      toAppend.push({
-        _id: order._id,
-        orderNum,
-        rowData: formatOrderRow(order)
-      });
-    }
+  if (!unsyncedOrders.length) {
+    console.log('[SHEETS BACKFILL] All orders in database are already synced to Google Sheets.');
+    return { count: 0, newlyAppended: 0, alreadyInSheet: 0, failed: 0, total: 0 };
   }
 
-  // Mark orders already in Google Sheet as synced in MongoDB
-  if (alreadyExistingIds.length > 0) {
-    await ShopifyOrder.updateMany(
-      { _id: { $in: alreadyExistingIds } },
-      { $set: { spreadsheetStatus: 'synced' } }
-    );
-    console.log(`[SHEETS BACKFILL] Marked ${alreadyExistingIds.length} orders already in sheet as synced in DB`);
-  }
+  console.log(`[SHEETS BACKFILL] Found ${unsyncedOrders.length} unsynced orders in database to push`);
+
+  const toAppend = unsyncedOrders.map(order => ({
+    _id: order._id,
+    orderNum: String(order.orderNumber || order.shopifyOrderId || order.id).trim(),
+    rowData: formatOrderRow(order)
+  }));
 
   // Append new orders in batches of 100
   let totalAppended = 0;
@@ -325,7 +293,6 @@ const syncAllUnsyncedOrdersToSheet = async () => {
       );
 
       totalAppended += chunk.length;
-      chunk.forEach(item => existingOrderNumbers.add(item.orderNum));
       console.log(`[SHEETS BACKFILL] Appended batch of ${chunk.length} orders to Google Sheets`);
     } catch (appendErr) {
       console.error('[SHEETS BACKFILL BATCH ERROR]', appendErr.message);
@@ -333,13 +300,11 @@ const syncAllUnsyncedOrdersToSheet = async () => {
     }
   }
 
-  const grandTotalSynced = alreadyExistingIds.length + totalAppended;
-  console.log(`[SHEETS BACKFILL COMPLETE] Newly appended: ${totalAppended}, Already in sheet: ${alreadyExistingIds.length}, Failed: ${totalFailed}`);
+  console.log(`[SHEETS BACKFILL COMPLETE] Newly appended: ${totalAppended}, Failed: ${totalFailed}`);
 
   return {
-    count: grandTotalSynced,
+    count: totalAppended,
     newlyAppended: totalAppended,
-    alreadyInSheet: alreadyExistingIds.length,
     failed: totalFailed,
     total: unsyncedOrders.length
   };

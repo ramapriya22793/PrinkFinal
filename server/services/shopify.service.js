@@ -479,8 +479,12 @@ const runFullCustomerSync = async (shop, token) => {
   return { count };
 };
 
-const runRecentOrderSync = async (shop, token, limit = 50) => {
+const runRecentOrderSync = async (shop, token, limit = 25) => {
   console.log(`[SYNC RUNNER] Starting recent order sync for ${shop}...`);
+  try {
+    const { connectDB } = require('../db/connection');
+    await connectDB();
+  } catch (_) {}
   const client = createShopifyClient(shop, token);
   let count = 0;
   try {
