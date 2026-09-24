@@ -7,7 +7,7 @@ const settingSchema = new mongoose.Schema({
   emailNotifications: { type: Boolean, default: true },
   dpiThreshold: { type: Number, default: 300 },
   maxFileMB: { type: Number, default: 50 },
-  googleSheetId: { type: String, default: '1klYTlNaHAZGzJpdEYwcOi1AalQYem7RNOpAj1S0mVOg' },
+  googleSheetId: { type: String, default: '1S53f9TC1bXOLsLB3skQWyDWYIlSFD7WtyEm_bSOLhJs' },
   googleCredentialsJson: { type: mongoose.Schema.Types.Mixed }
 }, { timestamps: true });
 

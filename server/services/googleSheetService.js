@@ -4,8 +4,42 @@ const path = require('path');
 const mongoose = require('mongoose');
 
 const CREDENTIALS_PATH = path.join(__dirname, '../config/google-credentials.json');
-const DEFAULT_SPREADSHEET_ID = '1klYTlNaHAZGzJpdEYwcOi1AalQYem7RNOpAj1S0mVOg';
-const RANGE_NAME = 'Sheet1!A:I';
+const DEFAULT_SPREADSHEET_ID = '1S53f9TC1bXOLsLB3skQWyDWYIlSFD7WtyEm_bSOLhJs';
+const RANGE_NAME = 'Sheet1!A:L';
+
+/**
+ * Checks whether a given product / line item qualifies for Google Sheet sync.
+ * STRICT RULE: Only Polaroid Photo Prints (20 photos) and Prink Butterfly (8 photos).
+ * Do NOT sync selections, option choices, frames, keychains, cards, hampers, etc.
+ */
+function isEligibleSheetProduct(title, sku, count) {
+  const t = (title || '').toLowerCase();
+  const s = (sku || '').toLowerCase();
+
+  // 1. Immediately exclude selections / add-ons
+  if (t.includes('selection') || s.includes('selection')) return false;
+
+  // 2. Polaroid Photo Prints (20 photos)
+  // Matches "Polaroid Photo Print", "Polaroid Photo Prints", "Polaroid Prints", SKU "PG-PP-..."
+  // Excludes frames, keychains, grids, and hanging polaroids.
+  const isPolaroidPrint = (
+    (t.includes('polaroid') && (t.includes('print') || s.startsWith('pg-pp') || s.includes('polaroid-print'))) ||
+    s.startsWith('pg-pp-')
+  ) && !t.includes('frame') && !t.includes('keychain') && !t.includes('hanging');
+
+  // 3. Prink Butterfly (8 photos)
+  // Matches "Prink Butterfly Box", "Butterfly Box", "Prink Butterfly", SKU "PG-BB-...", "BB-..."
+  // Excludes butterfly cards and hampers.
+  const isButterfly = (
+    t.includes('prink butterfly') ||
+    t.includes('butterfly box') ||
+    s.startsWith('pg-bb-') ||
+    s.startsWith('bb-') ||
+    (t.includes('butterfly') && !t.includes('card') && !t.includes('hamper'))
+  );
+
+  return isPolaroidPrint || isButterfly;
+}
 
 /**
  * Dynamically resolves Google credentials from:
@@ -104,61 +138,108 @@ const getSheetsClient = async () => {
 };
 
 /**
- * Formats a date to consistent Indian Standard Time (IST): DD/MM/YYYY HH:MM AM/PM
+ * Formats a date to D-MMMM-YYYY (IST): e.g. 24-September-2026
  */
-const formatDateIST = (dateInput) => {
+const formatDateForWhatsAppSheet = (dateInput) => {
   const date = new Date(dateInput || Date.now());
   const istOffset = 5.5 * 60 * 60 * 1000;
   const istDate = new Date(date.getTime() + istOffset);
-  const dd = String(istDate.getUTCDate()).padStart(2, '0');
-  const mm = String(istDate.getUTCMonth() + 1).padStart(2, '0');
+  const d = istDate.getUTCDate();
+  const months = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+  const m = months[istDate.getUTCMonth()];
   const yyyy = istDate.getUTCFullYear();
-  let hh = istDate.getUTCHours();
-  const min = String(istDate.getUTCMinutes()).padStart(2, '0');
-  const ampm = hh >= 12 ? 'PM' : 'AM';
-  hh = hh % 12 || 12;
-  return `${dd}/${mm}/${yyyy} ${hh}:${min} ${ampm}`;
+  return `'${d}-${m}-${yyyy}`;
 };
 
 /**
- * Formats an order object into a sheet row array
+ * Cleans phone number to standard 10-digit Indian mobile number
  */
-const formatOrderRow = (order) => {
-  const orderNumber = String(order.orderNumber || order.shopifyOrderId || order.id);
-  let name = 'Guest';
+const cleanWhatsAppPhone = (phoneInput) => {
+  if (!phoneInput) return '';
+  let digits = String(phoneInput).replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) {
+    digits = digits.slice(2);
+  } else if (digits.length === 11 && digits.startsWith('0')) {
+    digits = digits.slice(1);
+  }
+  return digits;
+};
+
+/**
+ * Formats an order object into a sheet row array matching the sheet headers
+ */
+const formatOrderRow = (order, headers = []) => {
+  const cleanOrderNumber = String(order.orderNumber || order.shopifyOrderId || order.id || '').replace(/^#/, '').trim();
+  
+  let customerName = 'Customer';
   if (order.customer) {
     if (order.customer.firstName || order.customer.lastName) {
-      name = `${order.customer.firstName || ''} ${order.customer.lastName || ''}`.trim();
+      customerName = `${order.customer.firstName || ''} ${order.customer.lastName || ''}`.trim();
     } else if (order.customer.name) {
-      name = order.customer.name;
+      customerName = order.customer.name;
     }
+  } else if (order.shippingAddress && order.shippingAddress.name) {
+    customerName = order.shippingAddress.name;
   }
 
-  const email = order.customer?.email || order.email || '';
-  const phone = order.customer?.phone || order.shippingAddress?.phone || order.phone || '';
-  const itemsStr = order.lineItems
-    ? order.lineItems.map(i => `${i.title} (x${i.quantity})`).join(', ')
-    : (order.product || '');
+  const phone = cleanWhatsAppPhone(order.customer?.phone || order.shippingAddress?.phone || order.phone || '');
+  const uploadLink = order.uploadLink || '';
 
+  // Check if sheet follows the WhatsApp API format (e.g. headers contain WhatsApp_Number or Template_Name)
+  const isWhatsAppFormat = !headers.length || headers.some(h => /whatsapp|template_name|send_trigger|order_number/i.test(String(h || '')));
+
+  if (isWhatsAppFormat) {
+    return [
+      formatDateForWhatsAppSheet(order.createdAt || order.createdAtShopify),
+      cleanOrderNumber,
+      customerName,
+      phone,
+      'Yes',
+      uploadLink,
+      'Customization Link',
+      'English',
+      '{{Order Number}}, {{Customer Name}}, {{Upload_Link}}',
+      'Yes',
+      '',
+      ''
+    ];
+  }
+
+  // Legacy fallback format
   return [
-    orderNumber,
-    formatDateIST(order.createdAt || order.createdAtShopify),
-    name,
-    email,
+    cleanOrderNumber,
+    formatDateForWhatsAppSheet(order.createdAt || order.createdAtShopify),
+    customerName,
+    order.customer?.email || order.email || '',
     phone,
-    itemsStr,
+    order.product || (order.lineItems ? order.lineItems.map(i => `${i.title} (x${i.quantity})`).join(', ') : ''),
     order.totalPrice || '',
-    order.uploadLink || '',
+    uploadLink,
     order.uploadStatus || 'pending'
   ];
 };
 
 /**
  * Main function to sync a single order to Google Sheets (used by real-time webhooks).
- * Handles duplicate checking and status updating.
+ * Checks product eligibility (only Polaroid Photo Prints 20 photos or Prink Butterfly 8 photos).
+ * Checks duplicate order numbers in Google Sheet to prevent multiple entries.
  */
 const updateSpreadsheet = async (order) => {
   try {
+    const cleanOrderNumber = String(order.orderNumber || order.shopifyOrderId || order.id || '').replace(/^#/, '').trim();
+    
+    // 1. Check Product Eligibility
+    const hasEligibleProduct = isEligibleSheetProduct(order.product, order.sku, order.requiredPhotoCount)
+      || (order.lineItems && order.lineItems.some(i => isEligibleSheetProduct(i.title, i.sku)));
+
+    if (!hasEligibleProduct) {
+      console.log(`[GOOGLE SHEETS] Skipping order #${cleanOrderNumber}: Not an eligible product (Only Polaroid Photo Prints 20 photos and Prink Butterfly 8 photos are synced).`);
+      return false;
+    }
+
     const spreadsheetId = await resolveSpreadsheetId();
     if (!spreadsheetId) {
       console.warn('[GOOGLE SHEETS] Spreadsheet ID is missing');
@@ -168,52 +249,67 @@ const updateSpreadsheet = async (order) => {
     const sheets = await getSheetsClient();
     if (!sheets) return false;
     if (sheets === 'mock') {
-      console.log(`[GOOGLE SHEETS] (Mock Mode) Synced order ${order.orderNumber}`);
+      console.log(`[GOOGLE SHEETS] (Mock Mode) Synced order #${cleanOrderNumber}`);
       return true;
     }
 
-    const orderNumber = String(order.orderNumber || order.shopifyOrderId || order.id);
-    const rowData = formatOrderRow(order);
+    // 2. Read Sheet1 Header Row (Row 1) to dynamically locate Order_Number column
+    let headers = [];
+    let orderColIndex = 1; // Default to Column B (index 1) for WhatsApp Sheet
+    try {
+      const headerRes = await sheets.spreadsheets.values.get({
+        spreadsheetId,
+        range: 'Sheet1!1:1',
+      });
+      if (headerRes.data.values && headerRes.data.values[0]) {
+        headers = headerRes.data.values[0];
+        const idx = headers.findIndex(h => /order.*num/i.test(String(h || '')));
+        if (idx !== -1) orderColIndex = idx;
+      }
+    } catch (hErr) {
+      console.warn('[GOOGLE SHEETS] Could not read headers:', hErr.message);
+    }
 
-    // Fetch Column A to check for existing row
+    const orderColLetter = String.fromCharCode(65 + orderColIndex);
+
+    // 3. Fetch existing Order Numbers to prevent duplicates
+    let isDuplicate = false;
     let existingRowIndex = -1;
     try {
-      const getRes = await sheets.spreadsheets.values.get({
+      const colRes = await sheets.spreadsheets.values.get({
         spreadsheetId,
-        range: 'Sheet1!A:A',
+        range: `Sheet1!${orderColLetter}:${orderColLetter}`,
       });
-      const rows = getRes.data.values;
-      if (rows && rows.length) {
-        existingRowIndex = rows.findIndex(row => row && String(row[0]).trim() === orderNumber.trim());
+      const rows = colRes.data.values || [];
+      existingRowIndex = rows.findIndex((r, idx) => {
+        if (idx === 0) return false; // Ignore header row
+        return r && r[0] && String(r[0]).replace(/^#/, '').trim() === cleanOrderNumber;
+      });
+      if (existingRowIndex >= 0) {
+        isDuplicate = true;
       }
     } catch (fetchErr) {
-      console.warn('[GOOGLE SHEETS] Could not fetch existing rows for duplicate check:', fetchErr.message);
+      console.warn('[GOOGLE SHEETS] Could not fetch existing order column for duplicate check:', fetchErr.message);
     }
 
-    if (existingRowIndex >= 0) {
-      const sheetRow = existingRowIndex + 1;
-      await sheets.spreadsheets.values.update({
-        spreadsheetId,
-        range: `Sheet1!A${sheetRow}:I${sheetRow}`,
-        valueInputOption: 'USER_ENTERED',
-        requestBody: {
-          values: [rowData],
-        },
-      });
-      console.log(`[GOOGLE SHEETS] Successfully updated order ${orderNumber} at row ${sheetRow}`);
-    } else {
-      await sheets.spreadsheets.values.append({
-        spreadsheetId,
-        range: RANGE_NAME,
-        valueInputOption: 'USER_ENTERED',
-        insertDataOption: 'INSERT_ROWS',
-        requestBody: {
-          values: [rowData],
-        },
-      });
-      console.log(`[GOOGLE SHEETS] Successfully appended new order ${orderNumber}`);
+    if (isDuplicate) {
+      console.log(`[GOOGLE SHEETS] Duplicate webhook prevented: Order #${cleanOrderNumber} already exists in Google Sheet at row ${existingRowIndex + 1}. Skipping append.`);
+      return true;
     }
 
+    // 4. Format row data & append new order
+    const rowData = formatOrderRow(order, headers);
+    await sheets.spreadsheets.values.append({
+      spreadsheetId,
+      range: RANGE_NAME,
+      valueInputOption: 'USER_ENTERED',
+      insertDataOption: 'INSERT_ROWS',
+      requestBody: {
+        values: [rowData],
+      },
+    });
+
+    console.log(`[GOOGLE SHEETS] Successfully appended new order #${cleanOrderNumber} to Google Sheet.`);
     return true;
   } catch (error) {
     console.error(`[GOOGLE SHEETS ERROR] Failed to append order ${order.orderNumber || order.shopifyOrderId}:`, error.message);
@@ -223,14 +319,11 @@ const updateSpreadsheet = async (order) => {
 
 /**
  * Bulk backfill function:
- * 1. Reads all existing order numbers from Google Sheet in a single request.
- * 2. Identifies orders already in the sheet and marks them 'synced' in MongoDB.
- * 3. Appends all new unsynced orders in batch chunks of 100 rows per request.
- * 4. Ultra-fast, handles hundreds of orders in seconds within serverless limits.
+ * Syncs eligible unsynced orders to Google Sheets while preventing duplicates.
  */
 const syncAllUnsyncedOrdersToSheet = async () => {
   const ShopifyOrder = require('../models/ShopifyOrder');
-  console.log('[SHEETS BACKFILL] Starting bulk sync of unsynced orders...');
+  console.log('[SHEETS BACKFILL] Starting bulk sync of eligible unsynced orders...');
 
   const spreadsheetId = await resolveSpreadsheetId();
   if (!spreadsheetId) {
@@ -244,7 +337,7 @@ const syncAllUnsyncedOrdersToSheet = async () => {
     return { count: 0, failed: 0, total: 0, error: 'Sheets client unavailable' };
   }
 
-  // 1. Find all orders in DB that are not marked synced (limit 100 per run)
+  // 1. Fetch unsynced orders
   const unsyncedOrders = await ShopifyOrder.find({
     $or: [
       { spreadsheetStatus: { $ne: 'synced' } },
@@ -256,19 +349,79 @@ const syncAllUnsyncedOrdersToSheet = async () => {
   .lean();
 
   if (!unsyncedOrders.length) {
-    console.log('[SHEETS BACKFILL] All orders in database are already synced to Google Sheets.');
+    console.log('[SHEETS BACKFILL] No unsynced orders found in database.');
     return { count: 0, newlyAppended: 0, alreadyInSheet: 0, failed: 0, total: 0 };
   }
 
-  console.log(`[SHEETS BACKFILL] Found ${unsyncedOrders.length} unsynced orders in database to push`);
+  // 2. Filter only eligible products (Polaroid Photo Prints or Prink Butterfly)
+  const eligibleOrders = unsyncedOrders.filter(o => {
+    return o.lineItems && o.lineItems.some(item => isEligibleSheetProduct(item.title, item.sku));
+  });
 
-  const toAppend = unsyncedOrders.map(order => ({
-    _id: order._id,
-    orderNum: String(order.orderNumber || order.shopifyOrderId || order.id).trim(),
-    rowData: formatOrderRow(order)
-  }));
+  // Mark ineligible orders as synced so they don't keep polling
+  const ineligibleOrders = unsyncedOrders.filter(o => !eligibleOrders.includes(o));
+  if (ineligibleOrders.length > 0) {
+    await ShopifyOrder.updateMany(
+      { _id: { $in: ineligibleOrders.map(o => o._id) } },
+      { $set: { spreadsheetStatus: 'synced' } }
+    );
+  }
 
-  // Append new orders in batches of 100
+  if (!eligibleOrders.length) {
+    console.log('[SHEETS BACKFILL] No eligible Polaroid Photo Prints or Prink Butterfly orders to sync.');
+    return { count: 0, newlyAppended: 0, alreadyInSheet: 0, failed: 0, total: unsyncedOrders.length };
+  }
+
+  // 3. Read header and existing order numbers from sheet to prevent duplicates
+  let headers = [];
+  let orderColIndex = 1;
+  try {
+    const headerRes = await sheets.spreadsheets.values.get({ spreadsheetId, range: 'Sheet1!1:1' });
+    if (headerRes.data.values && headerRes.data.values[0]) {
+      headers = headerRes.data.values[0];
+      const idx = headers.findIndex(h => /order.*num/i.test(String(h || '')));
+      if (idx !== -1) orderColIndex = idx;
+    }
+  } catch (_) {}
+
+  const orderColLetter = String.fromCharCode(65 + orderColIndex);
+  let existingOrderNumbers = new Set();
+  try {
+    const colRes = await sheets.spreadsheets.values.get({ spreadsheetId, range: `Sheet1!${orderColLetter}:${orderColLetter}` });
+    const rows = colRes.data.values || [];
+    rows.forEach((r, idx) => {
+      if (idx > 0 && r && r[0]) {
+        existingOrderNumbers.add(String(r[0]).replace(/^#/, '').trim());
+      }
+    });
+  } catch (_) {}
+
+  // Filter out any that already exist in the sheet
+  const toAppend = [];
+  const alreadySyncedIds = [];
+
+  for (const order of eligibleOrders) {
+    const cleanNum = String(order.orderNumber || order.shopifyOrderId).replace(/^#/, '').trim();
+    if (existingOrderNumbers.has(cleanNum)) {
+      alreadySyncedIds.push(order._id);
+    } else {
+      toAppend.push({
+        _id: order._id,
+        orderNum: cleanNum,
+        rowData: formatOrderRow(order, headers)
+      });
+      existingOrderNumbers.add(cleanNum); // Prevent duplicates within batch
+    }
+  }
+
+  if (alreadySyncedIds.length > 0) {
+    await ShopifyOrder.updateMany(
+      { _id: { $in: alreadySyncedIds } },
+      { $set: { spreadsheetStatus: 'synced' } }
+    );
+  }
+
+  // Append new rows in chunks
   let totalAppended = 0;
   let totalFailed = 0;
   const CHUNK_SIZE = 100;
@@ -293,20 +446,18 @@ const syncAllUnsyncedOrdersToSheet = async () => {
       );
 
       totalAppended += chunk.length;
-      console.log(`[SHEETS BACKFILL] Appended batch of ${chunk.length} orders to Google Sheets`);
     } catch (appendErr) {
       console.error('[SHEETS BACKFILL BATCH ERROR]', appendErr.message);
       totalFailed += chunk.length;
     }
   }
 
-  console.log(`[SHEETS BACKFILL COMPLETE] Newly appended: ${totalAppended}, Failed: ${totalFailed}`);
-
   return {
     count: totalAppended,
     newlyAppended: totalAppended,
+    alreadyInSheet: alreadySyncedIds.length,
     failed: totalFailed,
-    total: unsyncedOrders.length
+    total: eligibleOrders.length
   };
 };
 
@@ -315,5 +466,9 @@ module.exports = {
   getSheetsClient,
   resolveSpreadsheetId,
   resolveCredentials,
-  syncAllUnsyncedOrdersToSheet
+  syncAllUnsyncedOrdersToSheet,
+  isEligibleSheetProduct,
+  formatOrderRow,
+  formatDateForWhatsAppSheet,
+  cleanWhatsAppPhone
 };

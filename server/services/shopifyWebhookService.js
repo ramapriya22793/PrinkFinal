@@ -350,28 +350,56 @@ async function processShopifyOrderWebhook(payload, topic = 'orders/create') {
   }
 
   // Automatically sync order to Google Sheets (real-time, on every new/updated order webhook)
+  // Flow: Shopify New Order → Webhook → Check Product → Polaroid/Butterfly → Get Order Details → Automatically Sync to Google Sheet
   try {
-    const { updateSpreadsheet } = require('./googleSheetService');
-    const sheetOrder = {
-      orderNumber: payload.order_number || orderName,
-      createdAt: savedOrders[0]?.createdAt || payload.created_at || new Date(),
-      customer: {
-        firstName: customer.name.split(' ')[0] || '',
-        lastName: customer.name.split(' ').slice(1).join(' ') || '',
-        email: customer.email,
-        phone: customer.phone
-      },
-      lineItems: lineItems.map(item => ({ title: item.title, quantity: item.quantity })),
-      totalPrice: payload.total_price || '',
-      uploadLink: firstResult?.uploadLink,
-      uploadStatus: savedOrders[0]?.uploadStatus || 'pending'
-    };
-    await updateSpreadsheet(sheetOrder);
-    await ShopifyOrder.updateOne(
-      { shopifyOrderId: shopifyId },
-      { $set: { spreadsheetStatus: 'synced' } }
-    ).catch(() => {});
-    console.log(`[WORKFLOW LOG] Google Sheets updated successfully for Order ${orderName}`);
+    const { isEligibleSheetProduct, updateSpreadsheet } = require('./googleSheetService');
+
+    // 1. Check Product: Only Polaroid Photo Prints (20 photos) or Prink Butterfly (8 photos)
+    const eligibleSavedOrder = savedOrders.find(so =>
+      isEligibleSheetProduct(so.product, so.sku, so.requiredPhotoCount)
+    );
+
+    const eligibleLineItem = !eligibleSavedOrder
+      ? lineItems.find(li => isEligibleSheetProduct(li.title, li.sku))
+      : null;
+
+    if (!eligibleSavedOrder && !eligibleLineItem) {
+      console.log(`[SHOPIFY WEBHOOK SERVICE] Skipping Google Sheets sync for Order ${orderName}: Product is not Polaroid Photo Prints (20 photos) or Prink Butterfly (8 photos).`);
+    } else {
+      const targetItem = eligibleSavedOrder || eligibleLineItem;
+      const targetUploadLink = eligibleSavedOrder?.uploadLink || firstResult?.uploadLink;
+      console.log(`[SHOPIFY WEBHOOK SERVICE] Order ${orderName} qualifies for Google Sheets sync: Product "${targetItem.product || targetItem.title}".`);
+
+      // 2. Get Complete Order Details from Shopify & Database
+      const sheetOrder = {
+        orderNumber: String(payload.order_number || orderName).replace(/^#/, ''),
+        createdAt: eligibleSavedOrder?.createdAt || payload.created_at || new Date(),
+        customer: {
+          name: customer.name,
+          firstName: payload.customer?.first_name || customer.name.split(' ')[0] || '',
+          lastName: payload.customer?.last_name || customer.name.split(' ').slice(1).join(' ') || '',
+          email: customer.email,
+          phone: customer.phone
+        },
+        product: targetItem.product || targetItem.title,
+        sku: targetItem.sku,
+        requiredPhotoCount: targetItem.requiredPhotoCount,
+        lineItems: lineItems.map(item => ({ title: item.title, quantity: item.quantity })),
+        totalPrice: payload.total_price || '',
+        uploadLink: targetUploadLink,
+        uploadStatus: eligibleSavedOrder?.uploadStatus || 'pending'
+      };
+
+      // 3. Automatically Sync to Google Sheet (handles duplicate prevention)
+      const synced = await updateSpreadsheet(sheetOrder);
+      if (synced) {
+        await ShopifyOrder.updateOne(
+          { shopifyOrderId: shopifyId },
+          { $set: { spreadsheetStatus: 'synced' } }
+        ).catch(() => {});
+        console.log(`[WORKFLOW LOG] Google Sheets updated successfully for Order ${orderName}`);
+      }
+    }
   } catch (sheetErr) {
     console.error('[SHOPIFY WEBHOOK SERVICE] Failed to sync order to Google Sheets:', sheetErr.message);
   }
