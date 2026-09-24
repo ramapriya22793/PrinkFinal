@@ -143,6 +143,10 @@ router.get('/', adminMiddleware, async (req, res) => {
                 await shopifyService.syncOrderToDb(o);
               }
               console.log(`[ADMIN BG AUTO-SYNC] Synced ${newOrders.length} live Shopify orders.`);
+              try {
+                const { syncAllUnsyncedOrdersToSheet } = require('../services/googleSheetService');
+                await syncAllUnsyncedOrdersToSheet();
+              } catch (_) {}
             }
           }
         } catch (syncErr) {
