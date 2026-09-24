@@ -87,5 +87,9 @@ async function connectDB() {
   return connectionPromise;
 }
 
-module.exports = { connectDB, redact };
+connectDB.connectDB = connectDB;
+connectDB.redact = redact;
+module.exports = connectDB;
+module.exports.connectDB = connectDB;
+module.exports.redact = redact;
 

@@ -24,7 +24,7 @@ const resolveCredentials = async () => {
 
   try {
     if (!mongoose.connection || mongoose.connection.readyState !== 1) {
-      const connectDB = require('../db/connection');
+      const { connectDB } = require('../db/connection');
       if (typeof connectDB === 'function') await connectDB();
     }
     const Setting = require('../models/Setting');
@@ -59,7 +59,7 @@ const resolveSpreadsheetId = async () => {
   }
   try {
     if (!mongoose.connection || mongoose.connection.readyState !== 1) {
-      const connectDB = require('../db/connection');
+      const { connectDB } = require('../db/connection');
       if (typeof connectDB === 'function') await connectDB();
     }
     const Setting = require('../models/Setting');

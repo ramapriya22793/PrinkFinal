@@ -1,5 +1,5 @@
 const Setting = require('../models/Setting');
-const connectDB = require('./connection');
+const { connectDB } = require('./connection');
 
 const DEFAULT_SETTINGS = {
   shopifyStore: 'prink-in.myshopify.com',
