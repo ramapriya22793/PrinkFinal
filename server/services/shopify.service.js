@@ -475,6 +475,24 @@ const runFullCustomerSync = async (shop, token) => {
   return { count };
 };
 
+const runRecentOrderSync = async (shop, token) => {
+  console.log(`[SYNC RUNNER] Starting recent order sync for ${shop}...`);
+  const client = createShopifyClient(shop, token);
+  let count = 0;
+  try {
+    const response = await client.get('/orders.json', { params: { limit: 250, status: 'any' } });
+    const batch = response.data.orders || [];
+    count = batch.length;
+    for (const o of batch) {
+      await syncOrderToDb(o);
+    }
+  } catch (err) {
+    console.error('[SYNC RUNNER ERROR] Recent order sync failed:', err.message);
+  }
+  console.log(`[SYNC RUNNER] Synced ${count} recent orders.`);
+  return { count };
+};
+
 const authenticateCustomerWithShopify = async (shop, storefrontToken, email, password) => {
   const url = `https://${shop}/api/2024-01/graphql.json`;
   const query = `
@@ -619,5 +637,6 @@ module.exports = {
   syncCustomerToDb,
   runFullProductSync,
   runFullOrderSync,
+  runRecentOrderSync,
   runFullCustomerSync
 };

@@ -21,7 +21,7 @@ const verifyWebhookSignature = (req, res, next) => {
     return next();
   }
 
-  const secret = process.env.SHOPIFY_WEBHOOK_SECRET || shopifyConfig.webhookSecret || shopifyConfig.apiSecret;
+  const secret = process.env.SHOPIFY_WEBHOOK_SECRET || shopifyConfig.webhookSecret || shopifyConfig.apiSecret ;
 
   if (!secret) {
     console.error('[WEBHOOK ERROR] SHOPIFY_WEBHOOK_SECRET is not configured in .env');

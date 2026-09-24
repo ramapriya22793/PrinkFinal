@@ -124,6 +124,33 @@ router.get('/', adminMiddleware, async (req, res) => {
     }
     const ordersWithDpi = cleanOrders.map(o => ({ ...o, ...deriveDpiStatus(o) }));
 
+    // Automatic background live sync for Shopify orders (throttled to once every 10 mins)
+    const now = Date.now();
+    if (!global._lastAdminOrderSync || (now - global._lastAdminOrderSync > 10 * 60 * 1000)) {
+      global._lastAdminOrderSync = now;
+      setImmediate(async () => {
+        try {
+          const db = require('../db');
+          const settings = await db.getSettings();
+          const shopifyConfig = require('../config/shopify.config');
+          const shop = settings.shopifyStore || process.env.SHOPIFY_STORE || shopifyConfig.store || 'prink-in.myshopify.com';
+          const token = settings.shopifyAccessToken || process.env.SHOPIFY_ACCESS_TOKEN || shopifyConfig.accessToken || '';
+          if (shop && token) {
+            const shopifyService = require('../services/shopify.service');
+            const newOrders = await shopifyService.getOrdersFromShopify(shop, token, { limit: 50, status: 'any' });
+            if (Array.isArray(newOrders) && newOrders.length > 0) {
+              for (const o of newOrders) {
+                await shopifyService.syncOrderToDb(o);
+              }
+              console.log(`[ADMIN BG AUTO-SYNC] Synced ${newOrders.length} live Shopify orders.`);
+            }
+          }
+        } catch (syncErr) {
+          console.warn('[ADMIN BG AUTO-SYNC ERROR]', syncErr.message);
+        }
+      });
+    }
+
     return res.json({
       orders: ordersWithDpi,
       pagination: { total, page, limit, pages: Math.ceil(total / limit) },
@@ -364,8 +391,9 @@ router.get('/customer/orders', authMiddleware(), async (req, res) => {
       try {
         const db = require('../db');
         const settings = await db.getSettings();
-        const shop = settings.shopifyStore || process.env.SHOPIFY_STORE;
-        const token = settings.shopifyAccessToken || process.env.SHOPIFY_ACCESS_TOKEN;
+        const shopifyConfig = require('../config/shopify.config');
+        const shop = settings.shopifyStore || process.env.SHOPIFY_STORE || shopifyConfig.store || 'prink-in.myshopify.com';
+        const token = settings.shopifyAccessToken || process.env.SHOPIFY_ACCESS_TOKEN || shopifyConfig.accessToken || '';
         if (!token || token === 'your_access_token_here' || !shop) return;
 
         if (!global._shopifySyncCache) global._shopifySyncCache = {};

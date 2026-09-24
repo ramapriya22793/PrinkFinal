@@ -245,8 +245,9 @@ app.get('/api/cron/sync', async (req, res) => {
 
     const db = require('./db');
     const settings = await db.getSettings();
-    const shop = settings.shopifyStore || process.env.SHOPIFY_STORE;
-    const token = settings.shopifyAccessToken || process.env.SHOPIFY_ACCESS_TOKEN;
+    const shopifyConfig = require('./config/shopify.config');
+    const shop = settings.shopifyStore || process.env.SHOPIFY_STORE || shopifyConfig.store || 'prink-in.myshopify.com';
+    const token = settings.shopifyAccessToken || process.env.SHOPIFY_ACCESS_TOKEN || shopifyConfig.accessToken || '';
 
     if (!token || token === 'your_access_token_here' || token.includes('your_admin_access_token_here')) {
       return res.status(400).json({ success: false, error: 'Shopify credentials not configured.' });

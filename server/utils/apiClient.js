@@ -10,9 +10,9 @@ const shopifyConfig = require('../config/shopify.config');
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const createShopifyClient = (shopDomain, accessToken) => {
-  const storeUrl = shopDomain || shopifyConfig.store;
-  const token = accessToken || shopifyConfig.accessToken;
-  const cleanStoreUrl = storeUrl.replace(/https?:\/\//, '');
+  const storeUrl = shopDomain || shopifyConfig.store || 'prink-in.myshopify.com';
+  const token = accessToken || shopifyConfig.accessToken || '';
+  const cleanStoreUrl = String(storeUrl || 'prink-in.myshopify.com').replace(/https?:\/\//, '');
 
   const client = axios.create({
     baseURL: `https://${cleanStoreUrl}/admin/api/${shopifyConfig.apiVersion}`,

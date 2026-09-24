@@ -8,6 +8,21 @@ const db = require('../db');
 const oauthStates = new Set();
 
 /**
+ * Resolves Shopify store domain and access token from request query/body,
+ * database Settings, and shopifyConfig fallbacks.
+ */
+const resolveCredentials = async (req) => {
+  let dbSettings = {};
+  try {
+    dbSettings = (await db.getSettings()) || {};
+  } catch (_) {}
+
+  const shop = req?.query?.shop || req?.body?.shop || dbSettings.shopifyStore || shopifyConfig.store || 'prink-in.myshopify.com';
+  const token = req?.query?.token || req?.body?.token || dbSettings.shopifyAccessToken || shopifyConfig.accessToken || process.env.SHOPIFY_ACCESS_TOKEN || '';
+  return { shop, token };
+};
+
+/**
  * Step 1: Generate Shopify App OAuth Authorization URL.
  */
 const initiateOAuth = (req, res) => {
@@ -92,10 +107,8 @@ const handleOAuthCallback = async (req, res) => {
  * Test Connection endpoint.
  */
 const testConnectivity = async (req, res) => {
-  const shop = req.query.shop || shopifyConfig.store;
-  const token = req.query.token || shopifyConfig.accessToken;
-
   try {
+    const { shop, token } = await resolveCredentials(req);
     const shopInfo = await shopifyService.getShopDetails(shop, token);
     res.json({
       success: true,
@@ -117,8 +130,7 @@ const testConnectivity = async (req, res) => {
 
 const getShopDetailsHandler = async (req, res) => {
   try {
-    const shop = req.query.shop || shopifyConfig.store;
-    const token = req.query.token || shopifyConfig.accessToken;
+    const { shop, token } = await resolveCredentials(req);
     const details = await shopifyService.getShopDetails(shop, token);
     res.json(details);
   } catch (err) {
@@ -127,11 +139,9 @@ const getShopDetailsHandler = async (req, res) => {
 };
 
 const getProductsHandler = async (req, res) => {
-  const shop = req.query.shop || shopifyConfig.store;
-  const token = req.query.token || shopifyConfig.accessToken;
-  console.log(`[SHOPIFY CONTROLLER] Fetching products for shop: ${shop}`);
-  console.log(`[SHOPIFY CONTROLLER] Query parameters:`, token);
   try {
+    const { shop, token } = await resolveCredentials(req);
+    console.log(`[SHOPIFY CONTROLLER] Fetching products for shop: ${shop}`);
     const products = await shopifyService.getProductsFromShopify(shop, token, req.query);
     res.json(products);
   } catch (err) {
@@ -141,8 +151,7 @@ const getProductsHandler = async (req, res) => {
 
 const getSingleProductHandler = async (req, res) => {
   try {
-    const shop = req.query.shop || shopifyConfig.store;
-    const token = req.query.token || shopifyConfig.accessToken;
+    const { shop, token } = await resolveCredentials(req);
     const product = await shopifyService.getProductByIdFromShopify(shop, token, req.params.id);
     res.json(product);
   } catch (err) {
@@ -152,8 +161,7 @@ const getSingleProductHandler = async (req, res) => {
 
 const createProductHandler = async (req, res) => {
   try {
-    const shop = req.query.shop || shopifyConfig.store;
-    const token = req.query.token || shopifyConfig.accessToken;
+    const { shop, token } = await resolveCredentials(req);
     const product = await shopifyService.createProductOnShopify(shop, token, req.body);
     res.status(201).json(product);
   } catch (err) {
@@ -163,8 +171,7 @@ const createProductHandler = async (req, res) => {
 
 const updateProductHandler = async (req, res) => {
   try {
-    const shop = req.query.shop || shopifyConfig.store;
-    const token = req.query.token || shopifyConfig.accessToken;
+    const { shop, token } = await resolveCredentials(req);
     const product = await shopifyService.updateProductOnShopify(shop, token, req.params.id, req.body);
     res.json(product);
   } catch (err) {
@@ -174,8 +181,7 @@ const updateProductHandler = async (req, res) => {
 
 const deleteProductHandler = async (req, res) => {
   try {
-    const shop = req.query.shop || shopifyConfig.store;
-    const token = req.query.token || shopifyConfig.accessToken;
+    const { shop, token } = await resolveCredentials(req);
     const result = await shopifyService.deleteProductFromShopify(shop, token, req.params.id);
     res.json(result);
   } catch (err) {
@@ -185,8 +191,7 @@ const deleteProductHandler = async (req, res) => {
 
 const getOrdersHandler = async (req, res) => {
   try {
-    const shop = req.query.shop || shopifyConfig.store;
-    const token = req.query.token || shopifyConfig.accessToken;
+    const { shop, token } = await resolveCredentials(req);
     const orders = await shopifyService.getOrdersFromShopify(shop, token, req.query);
     res.json(orders);
   } catch (err) {
@@ -196,8 +201,7 @@ const getOrdersHandler = async (req, res) => {
 
 const getSingleOrderHandler = async (req, res) => {
   try {
-    const shop = req.query.shop || shopifyConfig.store;
-    const token = req.query.token || shopifyConfig.accessToken;
+    const { shop, token } = await resolveCredentials(req);
     const order = await shopifyService.getOrderByIdFromShopify(shop, token, req.params.id);
     res.json(order);
   } catch (err) {
@@ -207,8 +211,7 @@ const getSingleOrderHandler = async (req, res) => {
 
 const getCustomersHandler = async (req, res) => {
   try {
-    const shop = req.query.shop || shopifyConfig.store;
-    const token = req.query.token || shopifyConfig.accessToken;
+    const { shop, token } = await resolveCredentials(req);
     const customers = await shopifyService.getCustomersFromShopify(shop, token, req.query);
     res.json(customers);
   } catch (err) {
@@ -217,12 +220,9 @@ const getCustomersHandler = async (req, res) => {
   }
 };
 
-
-
 const getInventoryHandler = async (req, res) => {
   try {
-    const shop = req.query.shop || shopifyConfig.store;
-    const token = req.query.token || shopifyConfig.accessToken;
+    const { shop, token } = await resolveCredentials(req);
     const inventory = await shopifyService.getInventoryFromShopify(shop, token, req.query);
     res.json(inventory);
   } catch (err) {
@@ -232,8 +232,7 @@ const getInventoryHandler = async (req, res) => {
 
 const getCollectionsHandler = async (req, res) => {
   try {
-    const shop = req.query.shop || shopifyConfig.store;
-    const token = req.query.token || shopifyConfig.accessToken;
+    const { shop, token } = await resolveCredentials(req);
     const collections = await shopifyService.getCollectionsFromShopify(shop, token, req.query);
     res.json(collections);
   } catch (err) {
@@ -243,41 +242,41 @@ const getCollectionsHandler = async (req, res) => {
 
 const syncHandler = async (req, res) => {
   try {
-    const shopifyConfig = require('../config/shopify.config');
-    const shop = req.query.shop || shopifyConfig.store;
-    const token = req.query.token || shopifyConfig.accessToken;
-    const shopifyService = require('../services/shopify.service');
+    const { shop, token } = await resolveCredentials(req);
 
     if (!token || token === 'your_access_token_here' || token.includes('your_admin_access_token_here')) {
       return res.status(400).json({ success: false, error: 'Shopify API Token not configured.' });
     }
 
-    console.log('[API MANUAL SYNC] Starting recent orders/customers sync + full product catalog sync...');
+    console.log(`[API MANUAL SYNC] Starting full live sync for store ${shop}...`);
     
-    // Sync only the 50 most recent orders
+    // Sync up to 250 most recent live orders across any status
     const client = createShopifyClient(shop, token);
-    const response = await client.get('/orders.json', { params: { limit: 50, status: 'any' } });
+    const response = await client.get('/orders.json', { params: { limit: 250, status: 'any' } });
     const orders = response.data.orders || [];
     
     for (const o of orders) {
       await shopifyService.syncOrderToDb(o);
     }
     
-    // Full product catalog sync (paginated via runFullProductSync) - the
-    // admin SKU-mapping dropdown reads every synced product's variants, so
-    // capping this at "50 most recent" (as it used to be) left the vast
-    // majority of a real catalog's SKUs permanently unreachable there.
+    // Full product catalog sync (paginated via runFullProductSync)
     const productSyncResult = await shopifyService.runFullProductSync(shop, token);
 
-    // Sync only the 50 most recent customers
-    const custResponse = await client.get('/customers.json', { params: { limit: 50 } });
+    // Sync recent customers
+    const custResponse = await client.get('/customers.json', { params: { limit: 250 } });
     const customers = custResponse.data.customers || [];
     for (const c of customers) {
       await shopifyService.syncCustomerToDb(c);
     }
 
-    console.log(`[API MANUAL SYNC] Completed. Synced ${orders.length} orders, ${productSyncResult.count} products (full catalog), and ${customers.length} customers.`);
-    res.json({ success: true, message: 'Sync completed successfully', productsSynced: productSyncResult.count });
+    console.log(`[API MANUAL SYNC] Completed. Synced ${orders.length} orders, ${productSyncResult.count} products, and ${customers.length} customers.`);
+    res.json({
+      success: true,
+      message: 'Sync completed successfully',
+      ordersSynced: orders.length,
+      productsSynced: productSyncResult.count,
+      customersSynced: customers.length
+    });
   } catch (err) {
     console.error('[API MANUAL SYNC ERROR]', err.message);
     res.status(500).json({ success: false, error: err.message });
