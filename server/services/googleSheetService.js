@@ -4,6 +4,7 @@ const path = require('path');
 const mongoose = require('mongoose');
 
 const CREDENTIALS_PATH = path.join(__dirname, '../config/google-credentials.json');
+const OLD_DEPRECATED_SHEET_ID = '1klYTlNaHAZGzJpdEYwcOi1AalQYem7RNOpAj1S0mVOg';
 const DEFAULT_SPREADSHEET_ID = '1S53f9TC1bXOLsLB3skQWyDWYIlSFD7WtyEm_bSOLhJs';
 const RANGE_NAME = 'Sheet1!A:L';
 
@@ -83,12 +84,12 @@ const resolveCredentials = async () => {
 
 /**
  * Dynamically resolves Google Spreadsheet ID from:
- * 1. Environment variable GOOGLE_SHEET_ID
+ * 1. Environment variable GOOGLE_SHEET_ID (ignoring old deprecated ID)
  * 2. MongoDB Setting model
- * 3. Default active spreadsheet ID
+ * 3. Default active spreadsheet ID (1S53f9TC1bXOLsLB3skQWyDWYIlSFD7WtyEm_bSOLhJs)
  */
 const resolveSpreadsheetId = async () => {
-  if (process.env.GOOGLE_SHEET_ID) {
+  if (process.env.GOOGLE_SHEET_ID && process.env.GOOGLE_SHEET_ID !== OLD_DEPRECATED_SHEET_ID) {
     return process.env.GOOGLE_SHEET_ID;
   }
   try {
@@ -98,7 +99,7 @@ const resolveSpreadsheetId = async () => {
     }
     const Setting = require('../models/Setting');
     const setting = await Setting.findOne({}).lean();
-    if (setting && setting.googleSheetId) {
+    if (setting && setting.googleSheetId && setting.googleSheetId !== OLD_DEPRECATED_SHEET_ID) {
       return setting.googleSheetId;
     }
   } catch (_) {}
