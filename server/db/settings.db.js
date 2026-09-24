@@ -1,4 +1,5 @@
 const Setting = require('../models/Setting');
+const connectDB = require('./connection');
 
 const DEFAULT_SETTINGS = {
   shopifyStore: 'prink-in.myshopify.com',
@@ -10,6 +11,7 @@ const DEFAULT_SETTINGS = {
 };
 
 async function getSettings() {
+  await connectDB();
   let settings = await Setting.findOne({}).lean();
   if (!settings) {
     settings = await Setting.create(DEFAULT_SETTINGS);
@@ -18,10 +20,11 @@ async function getSettings() {
 }
 
 async function updateSettings(updates) {
+  await connectDB();
   return await Setting.findOneAndUpdate(
     {},
     updates,
-    { upsert: true, new: true }
+    { upsert: true, returnDocument: 'after' }
   ).lean();
 }
 

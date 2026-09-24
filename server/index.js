@@ -319,6 +319,7 @@ app.get('/api/health', async (_req, res) => {
 // Google Sheets Test Endpoint
 app.get('/api/test/sheets', async (_req, res) => {
   try {
+    await connectDB();
     const { getSheetsClient, resolveSpreadsheetId } = require('./services/googleSheetService');
     const client = await getSheetsClient();
     if (!client) {

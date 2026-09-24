@@ -22,18 +22,20 @@ const resolveCredentials = async () => {
     } catch (_) {}
   }
 
-  if (mongoose.connection && mongoose.connection.readyState === 1) {
-    try {
-      const Setting = require('../models/Setting');
-      const setting = await Setting.findOne({}).lean();
-      if (setting && setting.googleCredentialsJson) {
-        try {
-          return typeof setting.googleCredentialsJson === 'string'
-            ? JSON.parse(setting.googleCredentialsJson)
-            : setting.googleCredentialsJson;
-        } catch (_) {}
-      }
-    } catch (_) {}
+  try {
+    if (!mongoose.connection || mongoose.connection.readyState !== 1) {
+      const connectDB = require('../db/connection');
+      if (typeof connectDB === 'function') await connectDB();
+    }
+    const Setting = require('../models/Setting');
+    const setting = await Setting.findOne({}).lean();
+    if (setting && setting.googleCredentialsJson) {
+      return typeof setting.googleCredentialsJson === 'string'
+        ? JSON.parse(setting.googleCredentialsJson)
+        : setting.googleCredentialsJson;
+    }
+  } catch (err) {
+    console.warn('[GOOGLE SHEETS] Error resolving creds from DB Setting:', err.message);
   }
 
   if (fs.existsSync(CREDENTIALS_PATH)) {
@@ -55,15 +57,17 @@ const resolveSpreadsheetId = async () => {
   if (process.env.GOOGLE_SHEET_ID) {
     return process.env.GOOGLE_SHEET_ID;
   }
-  if (mongoose.connection && mongoose.connection.readyState === 1) {
-    try {
-      const Setting = require('../models/Setting');
-      const setting = await Setting.findOne({}).lean();
-      if (setting && setting.googleSheetId) {
-        return setting.googleSheetId;
-      }
-    } catch (_) {}
-  }
+  try {
+    if (!mongoose.connection || mongoose.connection.readyState !== 1) {
+      const connectDB = require('../db/connection');
+      if (typeof connectDB === 'function') await connectDB();
+    }
+    const Setting = require('../models/Setting');
+    const setting = await Setting.findOne({}).lean();
+    if (setting && setting.googleSheetId) {
+      return setting.googleSheetId;
+    }
+  } catch (_) {}
   return DEFAULT_SPREADSHEET_ID;
 };
 
