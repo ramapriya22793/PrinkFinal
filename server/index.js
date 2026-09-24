@@ -254,23 +254,19 @@ app.get('/api/cron/sync', async (req, res) => {
     }
 
     const shopifyService = require('./services/shopify.service');
-    console.log('[CRON] Starting automated daily Shopify & Google Sheets sync...');
+    console.log('[CRON] Starting automated live Shopify & Google Sheets sync...');
     
-    // Sync products and customers
-    await shopifyService.runFullProductSync(shop, token);
-    await shopifyService.runFullCustomerSync(shop, token);
-    
-    // Sync recent orders (last 48 hours) to prevent serverless execution timeout
+    // Sync recent live orders and push any unsynced to Google Sheets
     const result = await shopifyService.runRecentOrderSync(shop, token);
 
-    // Also push any unsynced orders to Google Sheets
-    const sheetsResult = await require('./services/googleSheetService').syncAllUnsyncedOrdersToSheet();
+    // Sync product and customer catalogs in the background
+    shopifyService.runFullProductSync(shop, token).catch(e => console.warn('[CRON BG] Product sync error:', e.message));
+    shopifyService.runFullCustomerSync(shop, token).catch(e => console.warn('[CRON BG] Customer sync error:', e.message));
 
     res.json({
       success: true,
       message: 'Shopify & Google Sheets sync completed successfully',
-      syncedOrdersCount: result.count,
-      sheetsSyncedCount: sheetsResult.count
+      syncedOrdersCount: result.count
     });
   } catch (err) {
     console.error('[CRON ERROR] Sync failed:', err);
