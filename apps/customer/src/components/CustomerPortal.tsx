@@ -1271,18 +1271,25 @@ export default function CustomerPortal({
     }
 
     if (activeOrder.images && activeOrder.images.length > 0) {
+      const required = getRequiredPhotoCount(activeOrder);
+      let orderImages = activeOrder.images;
+      if (required > 0 && orderImages.length > required) {
+        orderImages = orderImages.slice(0, required);
+      }
       // Sync if new order OR if local images count differs from order images count
-      if (isNewOrder || images.length === 0 || images.length !== activeOrder.images.length) {
-        setImages(activeOrder.images.map((img: any) => ({
+      if (isNewOrder || images.length === 0 || images.length !== orderImages.length) {
+        setImages(orderImages.map((img: any) => ({
           id: img.id,
           name: img.name || 'image.jpg',
           src: img.previewUrl || img.src || img.url,
           url: img.url || img.src || img.previewUrl,
           previewUrl: img.previewUrl || img.url || img.src,
+          originalSrc: img.originalSrc || img.url || img.src,
           serverFilename: img.serverFilename || (img.url ? img.url.split('/').pop() : ''),
-          transform: img.transform
+          transform: img.transform,
+          isCropped: !!(img.isCropped || (img.name && img.name.startsWith('cropped_')))
         })));
-        setLivePreviewPhoto(activeOrder.images[0]?.previewUrl || activeOrder.images[0]?.src || activeOrder.images[0]?.url || null);
+        setLivePreviewPhoto(orderImages[0]?.previewUrl || orderImages[0]?.src || orderImages[0]?.url || null);
       }
     } else if (isNewOrder) {
       setImages([]);
@@ -1729,7 +1736,12 @@ export default function CustomerPortal({
   };
 
   // Upload a single file immediately to prevent 413 Payload Too Large errors
-  const uploadOne = async (file: File, localId: string, progressTimer?: ReturnType<typeof setInterval>) => {
+  const uploadOne = async (
+    file: File, 
+    localId: string, 
+    progressTimer?: ReturnType<typeof setInterval>,
+    replaceImageId?: string
+  ) => {
     if (!activeOrder) return;
 
     let fileToUpload = file;
@@ -1741,6 +1753,9 @@ export default function CustomerPortal({
 
     const body = new FormData();
     body.append('image', fileToUpload);
+    if (replaceImageId) {
+      body.append('replaceImageId', replaceImageId);
+    }
     
     try {
       const token = localStorage.getItem('customer_token');
@@ -1764,38 +1779,77 @@ export default function CustomerPortal({
         setUploadProgress(p => {
           const n = { ...p };
           delete n[localId];
+          if (replaceImageId) delete n[replaceImageId];
           return n;
         });
+
+        const targetId = replaceImageId || localId;
+        const finalId = data.image.id || targetId;
+
         setImages(prev => {
-          const updated = prev.map(img => img.id === localId 
+          const updated = prev.map(img => (img.id === targetId || img.id === localId)
             ? { 
                 ...img,
-                id: data.image.id, 
-                src: img.isCropped ? img.src : (data.image.previewUrl || data.image.url), 
-                url: data.image.url,
-                previewUrl: img.isCropped ? img.previewUrl : data.image.previewUrl,
+                id: finalId, 
+                src: data.image.previewUrl || data.image.url || img.src, 
+                url: data.image.url || img.url,
+                previewUrl: data.image.previewUrl || img.previewUrl || img.src,
                 originalSrc: img.originalSrc || data.image.url,
-                name: data.image.name, 
-                serverFilename: data.image.url.split('/').pop()
+                name: data.image.name || img.name, 
+                serverFilename: data.image.url ? data.image.url.split('/').pop() : img.serverFilename,
+                isCropped: true,
+                transform: img.transform
               } 
             : img
           );
-          if (updated[0]?.id === data.image.id) {
+          if (updated[0]?.id === finalId) {
             setLivePreviewPhoto(updated[0].src || data.image.previewUrl || data.image.url);
           }
           return updated;
         });
+
+        setActiveOrder(prev => {
+          if (!prev || !prev.images) return prev;
+          if (replaceImageId) {
+            const updatedImages = prev.images.map((img: any) =>
+              (img.id === replaceImageId || String(img._id) === replaceImageId)
+                ? { ...img, ...data.image, id: finalId, isCropped: true }
+                : img
+            );
+            return { ...prev, images: updatedImages };
+          } else {
+            if (!prev.images.some((img: any) => img.id === data.image.id)) {
+              return { ...prev, images: [...prev.images, data.image] };
+            }
+            return prev;
+          }
+        });
       } else {
-        showToast(data.error || 'Upload failed.', 'error');
-        setImages(prev => prev.filter(img => img.id !== localId));
+        showToast(data?.error || 'Upload failed.', 'error');
+        if (!replaceImageId) {
+          setImages(prev => prev.filter(img => img.id !== localId));
+        }
         if (progressTimer) clearInterval(progressTimer);
-        setUploadProgress(p => { const n = { ...p }; delete n[localId]; return n; });
+        setUploadProgress(p => { 
+          const n = { ...p }; 
+          delete n[localId]; 
+          if (replaceImageId) delete n[replaceImageId];
+          return n; 
+        });
       }
     } catch (e: any) {
       console.error('Upload error:', e);
       showToast(e.message || 'Network error during photo upload.', 'error');
-      setImages(prev => prev.filter(img => img.id !== localId));
-      setUploadProgress(p => { const n = { ...p }; delete n[localId]; return n; });
+      if (!replaceImageId) {
+        setImages(prev => prev.filter(img => img.id !== localId));
+      }
+      if (progressTimer) clearInterval(progressTimer);
+      setUploadProgress(p => { 
+        const n = { ...p }; 
+        delete n[localId]; 
+        if (replaceImageId) delete n[replaceImageId];
+        return n; 
+      });
     }
   };
 
@@ -1997,7 +2051,7 @@ export default function CustomerPortal({
         const safeName = cropTarget.name ? `cropped_${cropTarget.name.replace(/\.[^/.]+$/, '')}.jpg` : `cropped_${Date.now()}.jpg`;
         const croppedFile = dataURLtoFile(croppedDataUrl, safeName);
         const progressTimer = simulateProgress(cropTarget.id);
-        uploadOne(croppedFile, cropTarget.id, progressTimer);
+        uploadOne(croppedFile, cropTarget.id, progressTimer, cropTarget.id);
       } catch (uploadErr) {
         console.warn('Background upload of cropped image failed:', uploadErr);
       }
@@ -2028,7 +2082,7 @@ export default function CustomerPortal({
     });
   };
 
-  const removeImage = (id: string) => {
+  const removeImage = async (id: string) => {
     setImages(prev => {
       const filtered = prev.filter(img => img.id !== id);
       if (filtered.length === 0) {
@@ -2038,6 +2092,23 @@ export default function CustomerPortal({
       }
       return filtered;
     });
+
+    if (activeOrder) {
+      setActiveOrder(prev => prev ? {
+        ...prev,
+        images: Array.isArray(prev.images) ? prev.images.filter((img: any) => img.id !== id && String(img._id) !== id) : []
+      } : prev);
+
+      try {
+        const token = localStorage.getItem('customer_token');
+        await fetch(`/api/orders/${encodeURIComponent(activeOrder.id)}/image/${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': token ? `Bearer ${token}` : '' }
+        });
+      } catch (err) {
+        console.warn('Failed to delete image on server:', err);
+      }
+    }
   };
 
   const openCamera = async (mode: 'user' | 'environment' = facingMode) => {

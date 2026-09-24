@@ -132,7 +132,71 @@ async function cleanupDuplicateOrdersInDb(OrderModel, duplicateIdsToDelete, merg
   }
 }
 
+function deduplicateOrderImages(images, requiredCount) {
+  if (!Array.isArray(images) || images.length <= 1) return images || [];
+
+  const result = [];
+  const seenOriginalKeys = new Set();
+  const seenUrls = new Set();
+  const seenIds = new Set();
+
+  const croppedMap = new Map();
+  for (const img of images) {
+    if (!img) continue;
+    const name = String(img.name || '');
+    if (name.startsWith('cropped_')) {
+      const baseName = name.replace(/^cropped_/, '');
+      croppedMap.set(baseName, img);
+    }
+  }
+
+  for (let i = 0; i < images.length; i++) {
+    const img = images[i];
+    if (!img) continue;
+    const id = String(img.id || img._id || '');
+    const url = String(img.url || img.src || '');
+    const originalKey = String(img.originalKey || '');
+    const name = String(img.name || '');
+
+    if (croppedMap.has(name)) {
+      const croppedVersion = croppedMap.get(name);
+      result.push({
+        ...img,
+        ...croppedVersion,
+        id: img.id || croppedVersion.id,
+        isCropped: true
+      });
+      croppedMap.delete(name);
+      continue;
+    }
+
+    if (name.startsWith('cropped_')) {
+      const baseName = name.replace(/^cropped_/, '');
+      if (result.some(r => r.name === name || r.name === baseName || r.url === img.url)) {
+        continue;
+      }
+    }
+
+    if (url && seenUrls.has(url)) continue;
+    if (originalKey && seenOriginalKeys.has(originalKey)) continue;
+    if (id && seenIds.has(id)) continue;
+
+    if (url) seenUrls.add(url);
+    if (originalKey) seenOriginalKeys.add(originalKey);
+    if (id) seenIds.add(id);
+
+    result.push(img);
+  }
+
+  if (requiredCount && requiredCount > 0 && result.length > requiredCount) {
+    return result.slice(0, requiredCount);
+  }
+
+  return result;
+}
+
 module.exports = {
   deduplicateOrders,
-  cleanupDuplicateOrdersInDb
+  cleanupDuplicateOrdersInDb,
+  deduplicateOrderImages
 };

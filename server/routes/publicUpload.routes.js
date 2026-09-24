@@ -310,6 +310,34 @@ router.post('/order/:token/upload', uploadLimiter, requireUploadToken, (req, res
         uploadedAt: new Date()
       };
 
+      const replaceImageId = req.body.replaceImageId;
+      if (replaceImageId && Array.isArray(order.images)) {
+        const replaceIdx = order.images.findIndex(img => img && (img.id === replaceImageId || String(img._id) === replaceImageId));
+        if (replaceIdx !== -1) {
+          const finalImage = {
+            ...order.images[replaceIdx],
+            ...image,
+            id: replaceImageId,
+            isCropped: true
+          };
+          order.images[replaceIdx] = finalImage;
+          await Order.updateOne(
+            { id: order.id },
+            { $set: { images: order.images, uploadStatus: 'in_progress', customizationStatus: 'in-progress' } }
+          );
+          await db.addActivityLog(order.id, 'IMAGE_UPDATED', `Customer updated/cropped ${image.name}.`);
+          return res.json({
+            success: true,
+            image: publicImage(finalImage),
+            replaced: true,
+            replacedImageId: replaceImageId,
+            warnings: image.lowResolution
+              ? [`This photo will print at about ${dpi} DPI, below the recommended ${template.dpi} DPI.`]
+              : []
+          });
+        }
+      }
+
       // Atomic push avoids losing a concurrent upload (requirement: handle
       // rapid/simultaneous uploads without last-write-wins clobbering) and enforces the limit constraint.
       const result = await Order.updateOne(

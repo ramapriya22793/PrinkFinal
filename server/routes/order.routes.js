@@ -367,10 +367,16 @@ router.get('/customer/orders', authMiddleware(), async (req, res) => {
     }
 
     // ── Deduplicate customer orders to eliminate legacy bare-id parent records ──
-    const { deduplicateOrders, cleanupDuplicateOrdersInDb } = require('../utils/orderDeduplication');
+    const { deduplicateOrders, cleanupDuplicateOrdersInDb, deduplicateOrderImages } = require('../utils/orderDeduplication');
     const { cleanOrders, duplicateIdsToDelete, mergesToPerform } = deduplicateOrders(customerOrders);
     customerOrders = cleanOrders.map(order => {
       if (order.images && Array.isArray(order.images)) {
+        const reqLimit = order.requiredPhotoCount || ((order.productType === 'butterfly' || (order.product || '').toLowerCase().includes('butterfly')) ? 8 : ((order.productType === 'magazine' || (order.product || '').toLowerCase().includes('magazine')) ? 4 : 0));
+        const cleaned = deduplicateOrderImages(order.images, reqLimit);
+        if (cleaned.length !== order.images.length) {
+          Order.updateOne({ id: order.id }, { $set: { images: cleaned } }).catch(() => {});
+          order.images = cleaned;
+        }
         order.images = order.images.map(img => ({
           ...img,
           src: img.previewUrl || img.src || img.url,
@@ -658,8 +664,11 @@ router.post('/:id/upload', authMiddleware(), (req, res) => {
         fs.unlink(previewPath, () => {});
       }
 
+      const replaceImageId = req.body.replaceImageId;
+      const Order = require('../models/Order');
+
       const image = {
-        id: `img_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
+        id: replaceImageId || `img_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
         name: path.basename(req.file.originalname).slice(0, 120),
         originalKey: path.join('originals', req.file.filename),
         src: `/uploads/previews/${previewName}`,
@@ -672,23 +681,92 @@ router.post('/:id/upload', authMiddleware(), (req, res) => {
         uploadedAt: new Date()
       };
 
-      const Order = require('../models/Order');
-      await Order.updateOne(
-        { id: existingOrder.id },
-        { $push: { images: image }, $set: { uploadStatus: 'in_progress', customizationStatus: 'in-progress' } }
-      );
+      let replaced = false;
+      let finalImage = image;
 
-      await db.addActivityLog(existingOrder.id, 'IMAGE_UPLOADED', `Customer uploaded ${image.name}.`);
+      if (replaceImageId && Array.isArray(existingOrder.images)) {
+        const replaceIdx = existingOrder.images.findIndex(img => 
+          img && (img.id === replaceImageId || String(img._id) === replaceImageId)
+        );
+        if (replaceIdx !== -1) {
+          finalImage = {
+            ...existingOrder.images[replaceIdx],
+            ...image,
+            id: replaceImageId,
+            isCropped: true
+          };
+          existingOrder.images[replaceIdx] = finalImage;
+          await Order.updateOne(
+            { id: existingOrder.id },
+            { $set: { images: existingOrder.images, uploadStatus: 'in_progress', customizationStatus: 'in-progress' } }
+          );
+          await db.addActivityLog(existingOrder.id, 'IMAGE_UPDATED', `Customer updated/cropped ${image.name}.`);
+          replaced = true;
+        }
+      }
+
+      if (!replaced) {
+        await Order.updateOne(
+          { id: existingOrder.id },
+          { $push: { images: image }, $set: { uploadStatus: 'in_progress', customizationStatus: 'in-progress' } }
+        );
+        await db.addActivityLog(existingOrder.id, 'IMAGE_UPLOADED', `Customer uploaded ${image.name}.`);
+      }
 
       res.json({
         success: true,
-        image
+        image: finalImage,
+        replaced,
+        replacedImageId: replaced ? replaceImageId : undefined
       });
     } catch (err) {
       if (req.file?.path) fs.unlink(req.file.path, () => {});
       res.status(500).json({ success: false, error: err.message });
     }
   });
+});
+
+// Customer / Admin Delete Image
+router.delete('/:id/image/:imageId', authMiddleware(), async (req, res) => {
+  try {
+    const { id, imageId } = req.params;
+    const existingOrder = await db.getOrderById(id);
+    if (!existingOrder) {
+      return res.status(404).json({ success: false, error: 'Order not found' });
+    }
+    if (existingOrder.designLockedAt) {
+      return res.status(409).json({ success: false, error: 'This design is already confirmed and locked.', code: 'DESIGN_LOCKED' });
+    }
+    if (req.user && req.user.role !== 'admin') {
+      const userEmail = req.user.email;
+      const userPhone = req.user.phone;
+      const o = existingOrder;
+      const matchesEmail = userEmail && (
+        String(o.customer?.email || '').toLowerCase() === userEmail.toLowerCase() ||
+        String(o.email || '').toLowerCase() === userEmail.toLowerCase()
+      );
+      const matchesPhone = userPhone && (
+        String(o.customer?.phone || '').replace(/\D/g, '').endsWith(userPhone.replace(/\D/g, '').slice(-10)) ||
+        String(o.phone || '').replace(/\D/g, '').endsWith(userPhone.replace(/\D/g, '').slice(-10))
+      );
+      const dummyMatch = userEmail ? userEmail.match(/^(\d+)@customer\.com$/) : null;
+      const matchesId = dummyMatch && String(o.customer?.id) === dummyMatch[1];
+      if (!matchesEmail && !matchesPhone && !matchesId) {
+        return res.status(403).json({ success: false, error: 'Unauthorized to access this order' });
+      }
+    }
+
+    const Order = require('../models/Order');
+    const remainingImages = (existingOrder.images || []).filter(img => img && img.id !== imageId && String(img._id) !== imageId);
+    await Order.updateOne(
+      { id: existingOrder.id },
+      { $set: { images: remainingImages } }
+    );
+    await db.addActivityLog(existingOrder.id, 'IMAGE_DELETED', `Customer removed photo ${imageId}.`);
+    res.json({ success: true, message: 'Image deleted', remainingCount: remainingImages.length });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // Customer Upload & Design Submission
