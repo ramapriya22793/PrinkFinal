@@ -479,16 +479,18 @@ const runFullCustomerSync = async (shop, token) => {
   return { count };
 };
 
-const runRecentOrderSync = async (shop, token) => {
+const runRecentOrderSync = async (shop, token, limit = 50) => {
   console.log(`[SYNC RUNNER] Starting recent order sync for ${shop}...`);
   const client = createShopifyClient(shop, token);
   let count = 0;
   try {
-    const response = await client.get('/orders.json', { params: { limit: 250, status: 'any' } });
+    const response = await client.get('/orders.json', { params: { limit, status: 'any' } });
     const batch = response.data.orders || [];
     count = batch.length;
-    for (const o of batch) {
-      await syncOrderToDb(o, true);
+    // Process orders in chunks of 5 to stay within serverless execution limits
+    const CHUNK = 5;
+    for (let i = 0; i < batch.length; i += CHUNK) {
+      await Promise.all(batch.slice(i, i + CHUNK).map(o => syncOrderToDb(o, true)));
     }
   } catch (err) {
     console.error('[SYNC RUNNER ERROR] Recent order sync failed:', err.message);
