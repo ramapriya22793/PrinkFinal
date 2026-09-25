@@ -187,7 +187,7 @@ const formatOrderRow = (order, headers = []) => {
   }
 
   const phone = cleanWhatsAppPhone(order.customer?.phone || order.shippingAddress?.phone || order.phone || '');
-  const uploadLink = order.uploadLink || '';
+  const uploadLink = 'https://customer.theprink.in/customer/auth';
 
   // Check if sheet follows the WhatsApp API format (e.g. headers contain WhatsApp_Number or Template_Name)
   const isWhatsAppFormat = !headers.length || headers.some(h => /whatsapp|template_name|send_trigger|order_number/i.test(String(h || '')));

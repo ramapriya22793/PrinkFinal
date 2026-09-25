@@ -386,7 +386,7 @@ async function processShopifyOrderWebhook(payload, topic = 'orders/create') {
         requiredPhotoCount: targetItem.requiredPhotoCount,
         lineItems: lineItems.map(item => ({ title: item.title, quantity: item.quantity })),
         totalPrice: payload.total_price || '',
-        uploadLink: targetUploadLink,
+        uploadLink: 'https://customer.theprink.in/customer/auth',
         uploadStatus: eligibleSavedOrder?.uploadStatus || 'pending'
       };
 
